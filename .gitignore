@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.js
+!vite.config.ts
+cdk/config.json
+cdk/cdk.out/
+frontend/dist/
+frontend/node_modules/
+lambda/__pycache__/
+*.pyc
+.DS_Store
