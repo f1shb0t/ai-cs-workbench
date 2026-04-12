@@ -1,7 +1,11 @@
-import { signIn, signOut, getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
+import { signIn, signOut, getCurrentUser, fetchAuthSession, confirmSignIn } from 'aws-amplify/auth';
 
 export async function login(username: string, password: string) {
   return signIn({ username, password });
+}
+
+export async function completeNewPassword(newPassword: string) {
+  return confirmSignIn({ challengeResponse: newPassword });
 }
 
 export async function logout() {
