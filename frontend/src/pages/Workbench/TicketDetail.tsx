@@ -149,6 +149,35 @@ const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefre
           )}
         </div>
 
+        {/* Retrieved Chunks */}
+        {latestConversation?.retrievedChunks && latestConversation.retrievedChunks.length > 0 && (
+          <Collapse
+            size="small"
+            style={{ marginBottom: 16 }}
+            items={[{
+              key: 'chunks',
+              label: `🔍 召回片段 (${latestConversation.retrievedChunks.length})`,
+              children: latestConversation.retrievedChunks.map((chunk, i) => (
+                <Card key={i} size="small" style={{ marginBottom: 8, backgroundColor: '#fafafa' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Tag color={chunk.score >= 0.7 ? 'green' : chunk.score >= 0.4 ? 'orange' : 'red'}>
+                      置信度: {(chunk.score * 100).toFixed(1)}%
+                    </Tag>
+                    {chunk.uri && (
+                      <Typography.Text type="secondary" style={{ fontSize: 11 }} ellipsis>
+                        {chunk.uri.split('/').pop()}
+                      </Typography.Text>
+                    )}
+                  </div>
+                  <Typography.Paragraph style={{ fontSize: 13, margin: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
+                    {chunk.content}
+                  </Typography.Paragraph>
+                </Card>
+              )),
+            }]}
+          />
+        )}
+
         {/* Sources */}
         {latestConversation?.aiSources && latestConversation.aiSources.length > 0 && (
           <Collapse

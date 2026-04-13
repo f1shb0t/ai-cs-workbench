@@ -1,8 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, Button, Switch, Select, Slider, message, Typography, Spin, Alert } from 'antd';
+import { Card, Form, Input, Button, Switch, Select, Slider, message, Typography, Spin, Alert, AutoComplete } from 'antd';
 import { SaveOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { getConfig, updateConfig } from '../../services/api';
 import type { AppConfig } from '../../types';
+
+const MODEL_SUGGESTIONS = [
+  { value: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', label: 'Claude 4.5 Haiku (推荐)' },
+  { value: 'anthropic.claude-3-5-sonnet-20241022-v2:0', label: 'Claude 3.5 Sonnet v2' },
+  { value: 'anthropic.claude-3-5-haiku-20241022-v1:0', label: 'Claude 3.5 Haiku' },
+  { value: 'amazon.nova-pro-v1:0', label: 'Amazon Nova Pro' },
+  { value: 'amazon.nova-lite-v1:0', label: 'Amazon Nova Lite' },
+  { value: 'amazon.nova-micro-v1:0', label: 'Amazon Nova Micro' },
+];
 
 const Settings: React.FC = () => {
   const [form] = Form.useForm();
@@ -99,17 +108,21 @@ const Settings: React.FC = () => {
 
         {/* AI Config */}
         <Card title="🤖 AI 配置" style={{ marginBottom: 16 }}>
-          <Form.Item label="Knowledge Base ID" name="bedrock_kb_id" rules={[{ required: true, message: '请输入 Knowledge Base ID' }]}>
+          <Form.Item label="Knowledge Base ID" name="knowledge_base_id" rules={[{ required: true, message: '请输入 Knowledge Base ID' }]}>
             <Input placeholder="SWOFQ7S45C" />
           </Form.Item>
-          <Form.Item label="模型" name="bedrock_model_id">
-            <Select
-              options={[
-                { value: 'anthropic.claude-3-haiku-20240307-v1:0', label: 'Claude 3 Haiku (快速)' },
-                { value: 'anthropic.claude-3-sonnet-20240229-v1:0', label: 'Claude 3 Sonnet (平衡)' },
-                { value: 'anthropic.claude-3-5-sonnet-20241022-v2:0', label: 'Claude 3.5 Sonnet (高质量)' },
-                { value: 'anthropic.claude-3-5-haiku-20241022-v1:0', label: 'Claude 3.5 Haiku (快速+高质量)' },
-              ]}
+          <Form.Item
+            label="模型 ID"
+            name="model_id"
+            extra="输入 Bedrock 模型 ID，或从建议列表中选择"
+          >
+            <AutoComplete
+              options={MODEL_SUGGESTIONS}
+              placeholder="输入或选择模型 ID，例如 global.anthropic.claude-haiku-4-5-20251001-v1:0"
+              filterOption={(inputValue, option) =>
+                (option?.value as string)?.toLowerCase().includes(inputValue.toLowerCase()) ||
+                (option?.label as string)?.toLowerCase().includes(inputValue.toLowerCase())
+              }
             />
           </Form.Item>
           <Form.Item label="系统提示词" name="system_prompt">

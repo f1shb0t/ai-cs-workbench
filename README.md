@@ -74,8 +74,8 @@ config.json 配置项：
 
 | 字段 | 说明 | 必填 |
 |------|------|------|
-| bedrockKnowledgeBaseId | Bedrock 知识库 ID | ✅ |
-| bedrockModelId | Bedrock 模型 ID | 否，默认 Claude 3 Haiku |
+| knowledgeBaseId | Bedrock 知识库 ID | ✅ |
+| modelId | Bedrock 模型 ID | 否，默认 Claude 4.5 Haiku |
 | systemPrompt | 系统提示词 | 否 |
 | awsRegion | 部署区域 | 否，默认 us-west-2 |
 | stackName | CloudFormation Stack 名称 | 否，自动生成 |

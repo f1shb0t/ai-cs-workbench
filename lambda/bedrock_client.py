@@ -12,6 +12,56 @@ logger = logging.getLogger(__name__)
 bedrock_agent_runtime = boto3.client("bedrock-agent-runtime")
 
 
+def retrieve_chunks(
+    question: str,
+    kb_id: str,
+    num_results: int = 5,
+) -> list[dict]:
+    """
+    Call Bedrock Retrieve API to get raw chunks with confidence scores.
+
+    Returns:
+        [{"content": str, "score": float, "uri": str, "metadata": dict}, ...]
+    """
+    if not kb_id:
+        return []
+
+    try:
+        response = bedrock_agent_runtime.retrieve(
+            knowledgeBaseId=kb_id,
+            retrievalQuery={"text": question},
+            retrievalConfiguration={
+                "vectorSearchConfiguration": {
+                    "numberOfResults": num_results,
+                }
+            },
+        )
+
+        chunks = []
+        for result in response.get("retrievalResults", []):
+            content_obj = result.get("content", {})
+            content_text = content_obj.get("text", "")
+            score = result.get("score", 0.0)
+            location = result.get("location", {})
+            s3_loc = location.get("s3Location", {})
+            uri = s3_loc.get("uri", "")
+            metadata = result.get("metadata", {})
+
+            chunks.append({
+                "content": content_text,
+                "score": float(score),
+                "uri": uri,
+                "metadata": metadata,
+            })
+
+        chunks.sort(key=lambda x: x["score"], reverse=True)
+        return chunks
+
+    except Exception as e:
+        logger.error(f"Retrieve API failed: {e}")
+        return []
+
+
 def query_knowledge_base(
     question: str,
     kb_id: str | None = None,
@@ -19,17 +69,19 @@ def query_knowledge_base(
     system_prompt: str | None = None,
 ) -> dict:
     """
-    Query Bedrock Knowledge Base using RetrieveAndGenerate API.
-    
+    Query Bedrock Knowledge Base using RetrieveAndGenerate API,
+    and also call Retrieve API for raw chunks.
+
     Returns:
         {
             "answer": str,
-            "sources": [{"uri": str, "title": str, "snippet": str}],
+            "sources": [{"uri": str, "snippet": str}],
+            "retrieved_chunks": [{"content": str, "score": float, "uri": str}],
             "latency_ms": int,
         }
     """
-    kb_id = kb_id or os.environ.get("BEDROCK_KB_ID", "")
-    model_id = model_id or os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
+    kb_id = kb_id or os.environ.get("KNOWLEDGE_BASE_ID", "")
+    model_id = model_id or os.environ.get("MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
     system_prompt = system_prompt or os.environ.get("SYSTEM_PROMPT", "")
 
     if not kb_id:
@@ -37,6 +89,7 @@ def query_knowledge_base(
         return {
             "answer": "Knowledge Base not configured. Please set the KB ID in settings.",
             "sources": [],
+            "retrieved_chunks": [],
             "latency_ms": 0,
         }
 
@@ -47,6 +100,10 @@ def query_knowledge_base(
     start_time = time.time()
 
     try:
+        # Step 1: Retrieve raw chunks (for display)
+        retrieved_chunks = retrieve_chunks(question, kb_id, num_results=5)
+
+        # Step 2: RetrieveAndGenerate for answer
         request_params: dict[str, Any] = {
             "input": {"text": question},
             "retrieveAndGenerateConfiguration": {
@@ -94,11 +151,12 @@ def query_knowledge_base(
                 if source_info["uri"] and source_info not in sources:
                     sources.append(source_info)
 
-        logger.info(f"Bedrock KB query completed in {latency_ms}ms, {len(sources)} sources")
+        logger.info(f"Bedrock KB query completed in {latency_ms}ms, {len(sources)} sources, {len(retrieved_chunks)} chunks")
 
         return {
             "answer": answer,
             "sources": sources,
+            "retrieved_chunks": retrieved_chunks,
             "latency_ms": latency_ms,
         }
 
@@ -108,5 +166,6 @@ def query_knowledge_base(
         return {
             "answer": f"AI query failed: {str(e)}",
             "sources": [],
+            "retrieved_chunks": [],
             "latency_ms": latency_ms,
         }

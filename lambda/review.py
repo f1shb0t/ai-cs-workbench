@@ -183,8 +183,8 @@ def regenerate_answer(event: dict) -> dict:
     config = db.get_all_config()
     ai_result = query_knowledge_base(
         question=player_message,
-        kb_id=config.get("bedrock_kb_id"),
-        model_id=config.get("bedrock_model_id"),
+        kb_id=config.get("knowledge_base_id"),
+        model_id=config.get("model_id"),
         system_prompt=config.get("system_prompt"),
     )
 
@@ -197,9 +197,10 @@ def regenerate_answer(event: dict) -> dict:
         "playerMessage": player_message,
         "aiAnswer": ai_result["answer"],
         "aiSources": ai_result["sources"],
+        "retrievedChunks": ai_result["retrieved_chunks"],
         "aiLatencyMs": ai_result["latency_ms"],
-        "aiModel": config.get("bedrock_model_id", ""),
-        "aiKbId": config.get("bedrock_kb_id", ""),
+        "aiModel": config.get("model_id", ""),
+        "aiKbId": config.get("knowledge_base_id", ""),
         "reviewStatus": models.PENDING_REVIEW,
     }
     db.put_conversation(conversation)

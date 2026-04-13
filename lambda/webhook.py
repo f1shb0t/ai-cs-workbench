@@ -97,12 +97,12 @@ def _handle_ticket_create(data: dict, event_time: int) -> dict:
     db.put_ticket(ticket_info)
 
     # Generate AI answer if auto-generate is enabled
-    ai_result = {"answer": "", "sources": [], "latency_ms": 0}
+    ai_result = {"answer": "", "sources": [], "retrieved_chunks": [], "latency_ms": 0}
     if auto_generate:
         ai_result = query_knowledge_base(
             question=player_message,
-            kb_id=config.get("bedrock_kb_id"),
-            model_id=config.get("bedrock_model_id"),
+            kb_id=config.get("knowledge_base_id"),
+            model_id=config.get("model_id"),
             system_prompt=config.get("system_prompt"),
         )
 
@@ -119,9 +119,10 @@ def _handle_ticket_create(data: dict, event_time: int) -> dict:
         "tags": data.get("tags", []),
         "aiAnswer": ai_result["answer"],
         "aiSources": ai_result["sources"],
+        "retrievedChunks": ai_result["retrieved_chunks"],
         "aiLatencyMs": ai_result["latency_ms"],
-        "aiModel": config.get("bedrock_model_id", ""),
-        "aiKbId": config.get("bedrock_kb_id", ""),
+        "aiModel": config.get("model_id", ""),
+        "aiKbId": config.get("knowledge_base_id", ""),
         "reviewStatus": models.PENDING_REVIEW if auto_generate and ai_result["answer"] else "no_answer",
     }
     db.put_conversation(conversation)
@@ -147,12 +148,12 @@ def _handle_new_message(data: dict, event_time: int) -> dict:
     config = db.get_all_config()
     auto_generate = config.get("auto_generate_enabled", True)
 
-    ai_result = {"answer": "", "sources": [], "latency_ms": 0}
+    ai_result = {"answer": "", "sources": [], "retrieved_chunks": [], "latency_ms": 0}
     if auto_generate:
         ai_result = query_knowledge_base(
             question=player_message,
-            kb_id=config.get("bedrock_kb_id"),
-            model_id=config.get("bedrock_model_id"),
+            kb_id=config.get("knowledge_base_id"),
+            model_id=config.get("model_id"),
             system_prompt=config.get("system_prompt"),
         )
 
@@ -166,9 +167,10 @@ def _handle_new_message(data: dict, event_time: int) -> dict:
         "playerName": data.get("userDisplayName", ""),
         "aiAnswer": ai_result["answer"],
         "aiSources": ai_result["sources"],
+        "retrievedChunks": ai_result["retrieved_chunks"],
         "aiLatencyMs": ai_result["latency_ms"],
-        "aiModel": config.get("bedrock_model_id", ""),
-        "aiKbId": config.get("bedrock_kb_id", ""),
+        "aiModel": config.get("model_id", ""),
+        "aiKbId": config.get("knowledge_base_id", ""),
         "reviewStatus": models.PENDING_REVIEW if auto_generate and ai_result["answer"] else "no_answer",
     }
     db.put_conversation(conversation)

@@ -1,6 +1,6 @@
 {
-  "bedrockKnowledgeBaseId": "YOUR_KB_ID",
-  "bedrockModelId": "anthropic.claude-3-haiku-20240307-v1:0",
+  "knowledgeBaseId": "YOUR_KNOWLEDGE_BASE_ID",
+  "modelId": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
   "systemPrompt": "You are a professional game customer service assistant. Answer questions accurately and politely based on the knowledge base. If you don't know the answer, say so honestly.",
   "awsRegion": "us-west-2",
   "stackName": "",

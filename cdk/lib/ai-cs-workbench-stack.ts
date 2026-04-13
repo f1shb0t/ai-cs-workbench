@@ -14,8 +14,8 @@ import { Construct } from 'constructs';
 
 export interface AiCsWorkbenchConfig {
   prefix: string;
-  bedrockKnowledgeBaseId: string;
-  bedrockModelId: string;
+  knowledgeBaseId: string;
+  modelId: string;
   systemPrompt: string;
 }
 
@@ -139,8 +139,8 @@ export class AiCsWorkbenchStack extends cdk.Stack {
         CONVERSATIONS_TABLE: conversationsTable.tableName,
         CONFIG_TABLE: configTable.tableName,
         TICKETS_TABLE: ticketsTable.tableName,
-        BEDROCK_KB_ID: config.bedrockKnowledgeBaseId,
-        BEDROCK_MODEL_ID: config.bedrockModelId,
+        KNOWLEDGE_BASE_ID: config.knowledgeBaseId,
+        MODEL_ID: config.modelId,
         SYSTEM_PROMPT: config.systemPrompt,
         POWERTOOLS_SERVICE_NAME: 'ai-cs-workbench',
       },

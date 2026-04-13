@@ -23,8 +23,8 @@ new AiCsWorkbenchStack(app, stackName, {
   },
   config: {
     prefix,
-    bedrockKnowledgeBaseId: config.bedrockKnowledgeBaseId,
-    bedrockModelId: config.bedrockModelId,
+    knowledgeBaseId: config.knowledgeBaseId,
+    modelId: config.modelId,
     systemPrompt: config.systemPrompt || '',
   },
 });

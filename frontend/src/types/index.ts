@@ -38,6 +38,7 @@ export interface Conversation {
   tags?: string[];
   aiAnswer: string;
   aiSources: AiSource[];
+  retrievedChunks?: RetrievedChunk[];
   aiLatencyMs: number;
   aiModel: string;
   aiKbId: string;
@@ -55,6 +56,13 @@ export interface AiSource {
   snippet: string;
 }
 
+export interface RetrievedChunk {
+  content: string;
+  score: number;
+  uri: string;
+  metadata?: Record<string, any>;
+}
+
 export interface DashboardStats {
   total: number;
   approved: number;
@@ -70,8 +78,8 @@ export interface AppConfig {
   aihelp_secret_key: string;
   aihelp_app_domain: string;
   aihelp_customer_login_name: string;
-  bedrock_kb_id: string;
-  bedrock_model_id: string;
+  knowledge_base_id: string;
+  model_id: string;
   system_prompt: string;
   temperature: number;
   max_tokens: number;
