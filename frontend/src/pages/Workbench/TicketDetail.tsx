@@ -157,7 +157,16 @@ const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefre
             items={[{
               key: 'chunks',
               label: `🔍 召回片段 (${latestConversation.retrievedChunks.length})`,
-              children: latestConversation.retrievedChunks.map((chunk, i) => (
+              children: latestConversation.retrievedChunks.map((chunk, i) => {
+                // Support both formats:
+                // New: question/answer fields explicitly set
+                // Old: content = question text, metadata.Answer = knowledge content
+                const metaAnswer = chunk.metadata?.Answer || chunk.metadata?.answer || '';
+                const question = chunk.question || (metaAnswer ? chunk.content : '');
+                const answer = chunk.answer || metaAnswer || '';
+                const displayContent = answer || chunk.content || '';
+
+                return (
                 <Card key={i} size="small" style={{ marginBottom: 8, backgroundColor: '#fafafa' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                     <Tag color={chunk.score >= 0.7 ? 'green' : chunk.score >= 0.4 ? 'orange' : 'red'}>
@@ -169,28 +178,23 @@ const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefre
                       </Typography.Text>
                     )}
                   </div>
-                  {chunk.question && (
+                  {question && (
                     <div style={{ marginBottom: 6 }}>
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>📋 匹配问题：</Typography.Text>
                       <Typography.Paragraph style={{ fontSize: 13, margin: '2px 0 0', color: '#595959' }}>
-                        {chunk.question}
+                        {question}
                       </Typography.Paragraph>
                     </div>
                   )}
-                  {chunk.answer ? (
-                    <div>
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>💡 知识片段：</Typography.Text>
-                      <Typography.Paragraph style={{ fontSize: 13, margin: '2px 0 0', whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
-                        {chunk.answer}
-                      </Typography.Paragraph>
-                    </div>
-                  ) : (
-                    <Typography.Paragraph style={{ fontSize: 13, margin: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
-                      {chunk.content}
+                  <div>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>💡 知识片段：</Typography.Text>
+                    <Typography.Paragraph style={{ fontSize: 13, margin: '2px 0 0', whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
+                      {displayContent}
                     </Typography.Paragraph>
-                  )}
+                  </div>
                 </Card>
-              )),
+                );
+              }),
             }]}
           />
         )}
