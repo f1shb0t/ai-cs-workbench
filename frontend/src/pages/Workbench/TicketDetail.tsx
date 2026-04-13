@@ -169,9 +169,26 @@ const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefre
                       </Typography.Text>
                     )}
                   </div>
-                  <Typography.Paragraph style={{ fontSize: 13, margin: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
-                    {chunk.content}
-                  </Typography.Paragraph>
+                  {chunk.question && (
+                    <div style={{ marginBottom: 6 }}>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>📋 匹配问题：</Typography.Text>
+                      <Typography.Paragraph style={{ fontSize: 13, margin: '2px 0 0', color: '#595959' }}>
+                        {chunk.question}
+                      </Typography.Paragraph>
+                    </div>
+                  )}
+                  {chunk.answer ? (
+                    <div>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>💡 知识片段：</Typography.Text>
+                      <Typography.Paragraph style={{ fontSize: 13, margin: '2px 0 0', whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
+                        {chunk.answer}
+                      </Typography.Paragraph>
+                    </div>
+                  ) : (
+                    <Typography.Paragraph style={{ fontSize: 13, margin: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
+                      {chunk.content}
+                    </Typography.Paragraph>
+                  )}
                 </Card>
               )),
             }]}

@@ -58,6 +58,8 @@ export interface AiSource {
 
 export interface RetrievedChunk {
   content: string;
+  question?: string;
+  answer?: string;
   score: number;
   uri: string;
   metadata?: Record<string, any>;

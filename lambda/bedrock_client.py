@@ -19,9 +19,11 @@ def retrieve_chunks(
 ) -> list[dict]:
     """
     Call Bedrock Retrieve API to get raw chunks with confidence scores.
+    Extracts Answer from metadata if available (KB stores Q&A pairs where
+    content = question, metadata.Answer = the actual answer).
 
     Returns:
-        [{"content": str, "score": float, "uri": str, "metadata": dict}, ...]
+        [{"content": str, "question": str, "answer": str, "score": float, "uri": str, "metadata": dict}, ...]
     """
     if not kb_id:
         return []
@@ -47,8 +49,13 @@ def retrieve_chunks(
             uri = s3_loc.get("uri", "")
             metadata = result.get("metadata", {})
 
+            # Extract Answer from metadata (KB stores Q in content, A in metadata)
+            answer = metadata.get("Answer", "") or metadata.get("answer", "")
+
             chunks.append({
-                "content": content_text,
+                "question": content_text,
+                "answer": answer,
+                "content": answer if answer else content_text,
                 "score": float(score),
                 "uri": uri,
                 "metadata": metadata,
