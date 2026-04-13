@@ -15,15 +15,25 @@ const Workbench: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const fetchTickets = useCallback(async () => {
+    setLoading(true);
     try {
       const result = await getReviews(statusFilter === 'all' ? undefined : statusFilter);
       setTickets(result.items);
     } catch (err) {
       console.error('Failed to fetch tickets:', err);
+    } finally {
+      setLoading(false);
     }
   }, [statusFilter]);
 
   usePolling(fetchTickets, 10000);
+
+  const handleStatusFilterChange = (status: string) => {
+    setStatusFilter(status);
+    setTickets([]);
+    setSelectedTicket(null);
+    setConversations([]);
+  };
 
   const handleSelectTicket = async (ticket: Ticket) => {
     setSelectedTicket(ticket);
@@ -52,7 +62,7 @@ const Workbench: React.FC = () => {
           tickets={tickets}
           selectedId={selectedTicket?.ticketId}
           statusFilter={statusFilter}
-          onStatusFilterChange={setStatusFilter}
+          onStatusFilterChange={handleStatusFilterChange}
           onSelect={handleSelectTicket}
           loading={loading}
         />
