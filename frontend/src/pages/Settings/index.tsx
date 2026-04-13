@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, Button, Switch, Select, Slider, Tag, Space, message, Typography, Divider, Spin } from 'antd';
-import { SaveOutlined } from '@ant-design/icons';
+import { Card, Form, Input, Button, Switch, Select, Slider, message, Typography, Spin, Alert } from 'antd';
+import { SaveOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { getConfig, updateConfig } from '../../services/api';
 import type { AppConfig } from '../../types';
 
@@ -8,28 +8,51 @@ const Settings: React.FC = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [tagInput, setTagInput] = useState('');
+  const [loadError, setLoadError] = useState(false);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadConfig = () => {
+    setLoading(true);
+    setLoadError(false);
     getConfig()
       .then((config) => {
-        form.setFieldsValue(config);
+        if (config) {
+          // Ensure boolean type for switch
+          if (config.auto_generate_enabled !== undefined) {
+            config.auto_generate_enabled = !!config.auto_generate_enabled;
+          }
+          // Ensure number type for slider
+          if (config.temperature !== undefined) {
+            config.temperature = Number(config.temperature);
+          }
+          if (config.max_tokens !== undefined) {
+            config.max_tokens = Number(config.max_tokens);
+          }
+          form.setFieldsValue(config);
+        }
         setLoading(false);
       })
       .catch(() => {
-        message.error('加载配置失败');
+        setLoadError(true);
         setLoading(false);
       });
-  }, [form]);
+  };
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
+    setSavedAt(null);
     try {
       const values = form.getFieldsValue();
-      await updateConfig(values);
-      message.success('配置已保存');
+      const result = await updateConfig(values);
+      const count = result?.updated?.length ?? 0;
+      message.success(`配置已保存（${count} 项已更新）`);
+      setSavedAt(new Date().toLocaleTimeString('zh-CN'));
     } catch (err) {
-      message.error('保存失败');
+      message.error('保存失败，请重试');
     } finally {
       setSaving(false);
     }
@@ -40,17 +63,34 @@ const Settings: React.FC = () => {
   return (
     <div style={{ maxWidth: 800 }}>
       <Typography.Title level={4}>系统设置</Typography.Title>
+
+      {loadError && (
+        <Alert
+          type="error"
+          message="加载配置失败"
+          description="无法从服务器获取配置，请检查网络连接。"
+          action={<Button size="small" onClick={loadConfig}>重试</Button>}
+          style={{ marginBottom: 16 }}
+          showIcon
+        />
+      )}
+
       <Form form={form} layout="vertical">
         {/* AIHelp Connection */}
         <Card title="📡 AIHelp 连接配置" style={{ marginBottom: 16 }}>
-          <Form.Item label="App Key" name="aihelp_app_key" rules={[{ required: true }]}>
+          <Form.Item label="App Key" name="aihelp_app_key" rules={[{ required: true, message: '请输入 App Key' }]}>
             <Input placeholder="TryElva_app_xxx" />
           </Form.Item>
-          <Form.Item label="Secret Key" name="aihelp_secret_key" rules={[{ required: true }]}>
+          <Form.Item label="Secret Key" name="aihelp_secret_key" rules={[{ required: true, message: '请输入 Secret Key' }]}>
             <Input.Password placeholder="输入 Secret Key" />
           </Form.Item>
-          <Form.Item label="App Domain" name="aihelp_app_domain" rules={[{ required: true }]}>
-            <Input placeholder="your-game.aihelp.net" />
+          <Form.Item
+            label="App Domain (完整 URL)"
+            name="aihelp_app_domain"
+            rules={[{ required: true, message: '请输入 AIHelp 服务地址' }]}
+            extra="输入完整地址，包含协议。例如 https://your-game.aihelp.net 或 http://localhost:8888"
+          >
+            <Input placeholder="https://your-game.aihelp.net" />
           </Form.Item>
           <Form.Item label="默认客服账号" name="aihelp_customer_login_name">
             <Input placeholder="ai-assistant" />
@@ -59,7 +99,7 @@ const Settings: React.FC = () => {
 
         {/* AI Config */}
         <Card title="🤖 AI 配置" style={{ marginBottom: 16 }}>
-          <Form.Item label="Knowledge Base ID" name="bedrock_kb_id" rules={[{ required: true }]}>
+          <Form.Item label="Knowledge Base ID" name="bedrock_kb_id" rules={[{ required: true, message: '请输入 Knowledge Base ID' }]}>
             <Input placeholder="SWOFQ7S45C" />
           </Form.Item>
           <Form.Item label="模型" name="bedrock_model_id">
@@ -100,9 +140,16 @@ const Settings: React.FC = () => {
           </Form.Item>
         </Card>
 
-        <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving} size="large">
-          保存配置
-        </Button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving} size="large">
+            保存配置
+          </Button>
+          {savedAt && (
+            <Typography.Text type="success">
+              <CheckCircleOutlined /> 上次保存：{savedAt}
+            </Typography.Text>
+          )}
+        </div>
       </Form>
     </div>
   );

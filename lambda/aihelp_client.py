@@ -19,7 +19,11 @@ class AIHelpClient:
     def __init__(self, app_key: str, secret_key: str, app_domain: str):
         self.app_key = app_key
         self.secret_key = secret_key
-        self.base_url = f"https://{app_domain}"
+        # Support full URL (http://... or https://...) or bare domain (legacy)
+        if app_domain.startswith("http://") or app_domain.startswith("https://"):
+            self.base_url = app_domain.rstrip("/")
+        else:
+            self.base_url = f"https://{app_domain}"
 
     def _sign(self, method: str, uri: str, query_string: str = "", payload: str = "") -> dict:
         """
