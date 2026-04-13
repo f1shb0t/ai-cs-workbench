@@ -157,6 +157,8 @@ export class AiCsWorkbenchStack extends cdk.Stack {
         'bedrock:InvokeModelWithResponseStream',
         'bedrock:Retrieve',
         'bedrock:RetrieveAndGenerate',
+        'bedrock:GetInferenceProfile',
+        'bedrock:ListInferenceProfiles',
       ],
       resources: ['*'],
     }));
