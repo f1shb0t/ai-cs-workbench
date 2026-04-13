@@ -122,13 +122,13 @@ export class AiCsWorkbenchStack extends cdk.Stack {
     const handlerFunction = new lambda.Function(this, 'ApiHandler', {
       functionName: `${prefix}ai-cs-workbench-api`,
       runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'python.handler.lambda_handler',
+      handler: 'handler.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../../lambda'), {
         bundling: {
           image: lambda.Runtime.PYTHON_3_11.bundlingImage,
           command: [
             'bash', '-c',
-            'pip install -r requirements.txt -t /asset-output/python && cp *.py /asset-output/python/ && echo "handler bundled"',
+            'pip install -r requirements.txt -t /asset-output && cp *.py /asset-output/ && echo "handler bundled"',
           ],
         },
       }),
