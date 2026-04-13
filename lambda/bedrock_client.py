@@ -95,7 +95,14 @@ def query_knowledge_base(
 
     # Build model ARN
     region = os.environ.get("AWS_REGION", "us-west-2")
-    model_arn = f"arn:aws:bedrock:{region}::foundation-model/{model_id}"
+    if model_id.startswith("global.") or model_id.startswith("us.") or model_id.startswith("eu."):
+        # Cross-region inference profile: needs account ID
+        sts = boto3.client("sts")
+        account_id = sts.get_caller_identity()["Account"]
+        model_arn = f"arn:aws:bedrock:{region}:{account_id}:inference-profile/{model_id}"
+    else:
+        # Standard foundation model
+        model_arn = f"arn:aws:bedrock:{region}::foundation-model/{model_id}"
 
     start_time = time.time()
 
