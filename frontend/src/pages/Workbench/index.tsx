@@ -31,6 +31,7 @@ const Workbench: React.FC = () => {
   const handleStatusFilterChange = (status: string) => {
     setStatusFilter(status);
     setTickets([]);
+    setLoading(true);
     setSelectedTicket(null);
     setConversations([]);
   };
