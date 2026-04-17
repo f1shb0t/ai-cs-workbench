@@ -109,7 +109,7 @@ const Settings: React.FC = () => {
         {/* AI Config */}
         <Card title="🤖 AI 配置" style={{ marginBottom: 16 }}>
           <Form.Item label="Knowledge Base ID" name="knowledge_base_id" rules={[{ required: true, message: '请输入 Knowledge Base ID' }]}>
-            <Input placeholder="SWOFQ7S45C" />
+            <Input placeholder="输入 Bedrock Knowledge Base ID" />
           </Form.Item>
           <Form.Item
             label="模型 ID"
