@@ -32,11 +32,13 @@ DynamoDB     Bedrock  │  AIHelp API   Cognito
 
 ## 核心功能
 
-- **Webhook 自动接收** — AIHelp 客诉自动推送到工作台
+- **多 App 配置** — 支持多个游戏/产品来源，每个来源独立配置 AppKey / SecretKey / AppDomain / Knowledge Base
+- **Webhook 自动接收** — AIHelp 客诉自动推送到工作台，按 `appId` 路由到对应配置
 - **AI 自动生成回答** — 基于 Bedrock Knowledge Base 的 RAG 问答
 - **知识库召回片段** — 展示每次检索的匹配问题、知识片段及置信度分数
 - **Human-in-the-loop 审核** — 客服可确认/编辑/拒绝/重新生成 AI 答案
 - **一键回复** — 审核通过后直接通过 AIHelp API 回复玩家
+- **权限管理** — 基于 Cognito Groups，只有 `admins` 组成员可以修改系统配置
 - **数据看板** — 处理量、AI 采纳率、响应时间等统计
 - **首次登录引导** — 自动检测临时密码并引导设置新密码
 
@@ -213,27 +215,107 @@ aws cloudfront create-invalidation \
 
 ```bash
 WEBHOOK_URL=https://xxxxxx.execute-api.us-west-2.amazonaws.com/webhook/aihelp \
-APP_KEY=你的AppKey \
-SECRET_KEY=你的SecretKey \
 python app.py
 ```
+
+Simulator 内置 3 个示例 App（`game_a` / `game_b` / `game_c`），用于多游戏场景验证。也可以用 `APPS` / `APPS_FILE` 环境变量自定义。详见 [aihelp-simulator/README.md](https://github.com/f1shb0t/aihelp-simulator)。
 
 ### 7. 在工作台中配置连接
 
 1. 打开 CloudFront URL，使用步骤 4 创建的用户登录
 2. 进入 **系统设置**
-3. 填写 AIHelp 连接配置：
-   - **App Key** — AIHelp 的 appKey（或模拟平台的 APP_KEY）
-   - **Secret Key** — AIHelp 的 secretKey（或模拟平台的 SECRET_KEY）
-   - **App Domain** — AIHelp 服务地址，需要填完整 URL（如 `https://your-game.aihelp.net` 或测试用 `http://your-server:8888`）
+3. **新增 App**（点击「🎮 AIHelp Apps」卡右上角按钮）。每个 App 代表一个游戏/产品来源：
+   - **App ID** — 唯一标识，只允许字母/数字/下划线/连字符（如 `gameA_cn`）
+   - **App 名称** — 显示名
+   - **AIHelp App Key / Secret Key** — AIHelp 后台的 AppKey / SecretKey（或 Simulator 里的对应值）
+   - **App Domain** — 完整 URL（如 `https://your-game.aihelp.net` 或 `http://localhost:8888`）
    - **默认客服账号** — 回复时显示的客服名称
-4. 填写 AI 配置：
-   - **Knowledge Base ID** — Bedrock 知识库 ID
-   - **模型 ID** — 可从建议列表选择，也可手动输入任意 Bedrock 模型 ID
-   - **系统提示词** / 温度 / 最大回复长度
-5. 点击 **保存配置**
+   - **Knowledge Base ID** — 这个 App 对应的 Bedrock 知识库 ID
+   - **启用** — 关闭后此 App 不再接受 webhook 路由
+4. **全局 AI 配置**：模型 ID / 系统提示词 / 温度 / 最大回复长度（跨 App 共享）
+5. **业务规则**：
+   - 默认 App — webhook 未指定 appId 时的兜底
+   - Webhook 自动生成 AI 答案开关
+6. 点击 **保存配置**
+
+> 💡 只有 Cognito `admins` 组的用户才能修改配置（详见下文「权限管理」）。
 
 > 💡 Settings 页面的配置保存在 DynamoDB 中，会覆盖 CDK config.json 中的初始值。
+
+## 多 App 配置
+
+同一个 workbench 可同时接入多个 AIHelp App（对应不同游戏/产品的客诉来源），每个 App 独立绑定一套 AppKey / SecretKey / AppDomain / Knowledge Base。
+
+### 路由规则
+
+Webhook 进来后按下面的优先级匹配对应 App：
+1. `data.appId` 或 body 顶层的 `appId`
+2. `data.appKey` 或 body 顶层的 `appKey`（按 `aihelp_app_key` 查找）
+3. Settings 中配置的「默认 App」
+4. 第一个启用的 App（兜底，会记 warning）
+
+工单记录中会持久化 `appId`，后续回复都走该 App 的配置。
+
+### 升级兼容
+
+如果你之前用的是单 App 版本（v1），升级后：
+- 首次读取配置时，旧的顶层 `aihelp_app_key` / `secret_key` / `app_domain` / `knowledge_base_id` 会**自动迁移**为一个 `app_id=default` 的 App
+- 你可以在 Settings 页把它改名、改 ID，然后继续新增其他 App
+- 已有工单没有 `appId`，发送时会按「默认 App」兜底，不影响使用
+
+### 用 Simulator 多 App 联调
+
+见 [aihelp-simulator README](https://github.com/f1shb0t/aihelp-simulator)。本地启动 Simulator，进 `/apps` 页把每个 App 的 AppKey/SecretKey 复制到 workbench Settings，就可以模拟多来源客诉。
+
+## 权限管理
+
+系统配置（Settings 页）的写入权限通过 Cognito 用户组（`admins`）控制。
+
+### 基本规则
+
+| 用户 | GET /config | PUT /config（保存配置）| Settings 页行为 |
+|------|:---:|:---:|------|
+| 任何登录用户 | ✅ | ❌ | 只读（表单禁用，保存按钮隐藏，显示"只读模式"提示）|
+| `admins` 组成员 | ✅ | ✅ | 完整编辑权限 |
+
+后端 Lambda 和前端 UI 双端校验，非 admin 用户直接调 API 也会返回 403。
+
+### 把自己加为 admin
+
+```bash
+# 替换变量
+USER_POOL_ID=us-west-2_XXXXXXXXX   # CDK 输出的 UserPoolId
+USERNAME=your-cognito-username
+
+aws cognito-idp admin-add-user-to-group \
+  --user-pool-id $USER_POOL_ID \
+  --username $USERNAME \
+  --group-name admins \
+  --region us-west-2
+```
+
+添加后，**用户需要重新登录**（重新签发 ID token 以携带 `cognito:groups` claim）。
+
+### 列出 admins 组成员
+
+```bash
+aws cognito-idp list-users-in-group \
+  --user-pool-id $USER_POOL_ID \
+  --group-name admins \
+  --region us-west-2
+```
+
+### 移除 admin 权限
+
+```bash
+aws cognito-idp admin-remove-user-from-group \
+  --user-pool-id $USER_POOL_ID \
+  --username $USERNAME \
+  --group-name admins \
+  --region us-west-2
+```
+
+> ⚠️ **首次部署提醒**：`cdk deploy` 之后，admins 组是空的。你至少需要手动把自己加进去，否则谁都改不了系统配置。
 
 ## 使用说明
 
