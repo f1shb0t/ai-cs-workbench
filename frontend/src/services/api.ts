@@ -32,9 +32,10 @@ api.interceptors.request.use(async (config) => {
 });
 
 // Reviews
-export async function getReviews(status?: string, pageSize = 50) {
+export async function getReviews(status?: string, pageSize = 50, appId?: string) {
   const params: Record<string, string> = { pageSize: String(pageSize) };
   if (status) params.status = status;
+  if (appId) params.appId = appId;
   const { data } = await api.get<ApiResponse<{ items: Ticket[]; hasMore: boolean }>>('/reviews', { params });
   return data.data;
 }

@@ -1,5 +1,7 @@
 export interface Ticket {
   ticketId: string;
+  appId?: string;
+  appName?: string;
   userId: string;
   userDisplayName: string;
   platform: string;
@@ -28,6 +30,7 @@ export type ReviewStatus =
 
 export interface Conversation {
   ticketId: string;
+  appId?: string;
   timestamp: number;
   source: 'webhook' | 'manual';
   webhookEvent: string;
@@ -75,18 +78,36 @@ export interface DashboardStats {
   avg_latency_ms: number;
 }
 
-export interface AppConfig {
+export interface AppEntry {
+  app_id: string;
+  app_name: string;
   aihelp_app_key: string;
   aihelp_secret_key: string;
   aihelp_app_domain: string;
   aihelp_customer_login_name: string;
   knowledge_base_id: string;
+  enabled: boolean;
+}
+
+export interface AppConfig {
+  // Global (cross-app) AI config
   model_id: string;
   system_prompt: string;
   temperature: number;
   max_tokens: number;
   auto_generate_enabled: boolean;
   auto_generate_tags: string[];
+  default_app_id: string;
+
+  // Apps list
+  apps: AppEntry[];
+
+  // Legacy fields (ignored on save, kept for backward-compat reads)
+  aihelp_app_key?: string;
+  aihelp_secret_key?: string;
+  aihelp_app_domain?: string;
+  aihelp_customer_login_name?: string;
+  knowledge_base_id?: string;
 }
 
 export interface ApiResponse<T> {

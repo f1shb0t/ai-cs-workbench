@@ -1,18 +1,31 @@
-import React from 'react';
-import { List, Card, Tag, Tabs, Typography, Badge, Space } from 'antd';
-import type { Ticket } from '../../types';
+import React, { useMemo } from 'react';
+import { List, Card, Tag, Tabs, Typography, Badge, Space, Select } from 'antd';
+import type { Ticket, AppEntry } from '../../types';
 import { statusColor, statusText, formatTimeAgo, platformText } from '../../utils';
 
 interface Props {
   tickets: Ticket[];
+  apps?: AppEntry[];
   selectedId?: string;
   statusFilter: string;
+  appFilter?: string;
   onStatusFilterChange: (status: string) => void;
+  onAppFilterChange?: (appId: string) => void;
   onSelect: (ticket: Ticket) => void;
   loading: boolean;
 }
 
-const TicketList: React.FC<Props> = ({ tickets, selectedId, statusFilter, onStatusFilterChange, onSelect, loading }) => {
+const TicketList: React.FC<Props> = ({
+  tickets,
+  apps = [],
+  selectedId,
+  statusFilter,
+  appFilter = 'all',
+  onStatusFilterChange,
+  onAppFilterChange,
+  onSelect,
+  loading,
+}) => {
   const pendingCount = tickets.filter((t) => t.reviewStatus === 'pending_review').length;
 
   const tabItems = [
@@ -22,11 +35,36 @@ const TicketList: React.FC<Props> = ({ tickets, selectedId, statusFilter, onStat
     { key: 'all', label: '全部' },
   ];
 
+  const appOptions = useMemo(
+    () => [
+      { value: 'all', label: '全部 App' },
+      ...apps.map((a) => ({ value: a.app_id, label: a.app_name || a.app_id })),
+    ],
+    [apps],
+  );
+
+  const appNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    apps.forEach((a) => map.set(a.app_id, a.app_name || a.app_id));
+    return map;
+  }, [apps]);
+
   return (
     <Card
       title="工单列表"
       size="small"
       styles={{ body: { padding: 0 } }}
+      extra={
+        apps.length > 0 && onAppFilterChange ? (
+          <Select
+            size="small"
+            value={appFilter}
+            onChange={onAppFilterChange}
+            options={appOptions}
+            style={{ minWidth: 140 }}
+          />
+        ) : null
+      }
     >
       <Tabs
         activeKey={statusFilter}
@@ -58,6 +96,11 @@ const TicketList: React.FC<Props> = ({ tickets, selectedId, statusFilter, onStat
                 </Tag>
               </Space>
               <div style={{ marginTop: 4 }}>
+                {ticket.appId && (
+                  <Tag color="purple" style={{ fontSize: 11 }}>
+                    {appNameById.get(ticket.appId) || ticket.appName || ticket.appId}
+                  </Tag>
+                )}
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {ticket.userDisplayName || ticket.userId}
                 </Typography.Text>

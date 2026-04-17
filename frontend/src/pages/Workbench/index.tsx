@@ -1,9 +1,9 @@
-import React, { useState, useCallback } from 'react';
-import { Row, Col, Badge, message } from 'antd';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Row, Col, message } from 'antd';
 import TicketList from './TicketList';
 import TicketDetail from './TicketDetail';
-import type { Ticket, Conversation } from '../../types';
-import { getReviews, getTicketConversations } from '../../services/api';
+import type { Ticket, Conversation, AppEntry } from '../../types';
+import { getReviews, getTicketConversations, getConfig } from '../../services/api';
 import { usePolling } from '../../hooks/usePolling';
 
 const Workbench: React.FC = () => {
@@ -11,25 +11,45 @@ const Workbench: React.FC = () => {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [statusFilter, setStatusFilter] = useState('pending_review');
+  const [appFilter, setAppFilter] = useState<string>('all');
+  const [apps, setApps] = useState<AppEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    getConfig()
+      .then((cfg) => setApps(cfg?.apps ?? []))
+      .catch(() => setApps([]));
+  }, []);
 
   const fetchTickets = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await getReviews(statusFilter === 'all' ? undefined : statusFilter);
+      const result = await getReviews(
+        statusFilter === 'all' ? undefined : statusFilter,
+        50,
+        appFilter === 'all' ? undefined : appFilter,
+      );
       setTickets(result.items);
     } catch (err) {
       console.error('Failed to fetch tickets:', err);
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, appFilter]);
 
   usePolling(fetchTickets, 10000);
 
   const handleStatusFilterChange = (status: string) => {
     setStatusFilter(status);
+    setTickets([]);
+    setLoading(true);
+    setSelectedTicket(null);
+    setConversations([]);
+  };
+
+  const handleAppFilterChange = (appId: string) => {
+    setAppFilter(appId);
     setTickets([]);
     setLoading(true);
     setSelectedTicket(null);
@@ -61,9 +81,12 @@ const Workbench: React.FC = () => {
       <Col span={8} style={{ height: '100%', overflow: 'auto' }}>
         <TicketList
           tickets={tickets}
+          apps={apps}
           selectedId={selectedTicket?.ticketId}
           statusFilter={statusFilter}
+          appFilter={appFilter}
           onStatusFilterChange={handleStatusFilterChange}
+          onAppFilterChange={handleAppFilterChange}
           onSelect={handleSelectTicket}
           loading={loading}
         />
