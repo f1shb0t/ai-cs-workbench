@@ -103,6 +103,14 @@ export class AiCsWorkbenchStack extends cdk.Stack {
       generateSecret: false,
     });
 
+    // Admins group — members can edit system config (PUT /config)
+    const adminsGroup = new cognito.CfnUserPoolGroup(this, 'AdminsGroup', {
+      userPoolId: userPool.userPoolId,
+      groupName: 'admins',
+      description: 'Administrators who can modify system configuration',
+      precedence: 1,
+    });
+
     // ==================== Lambda ====================
 
     const lambdaLayer = new lambda.LayerVersion(this, 'DepsLayer', {

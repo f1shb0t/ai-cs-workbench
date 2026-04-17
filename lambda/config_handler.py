@@ -9,6 +9,38 @@ from utils import success, error
 
 logger = logging.getLogger(__name__)
 
+ADMIN_GROUP = "admins"
+
+
+def _extract_groups(event: dict) -> list[str]:
+    """Extract cognito:groups claim from the API Gateway JWT authorizer.
+
+    HTTP API (v2) exposes claims under requestContext.authorizer.jwt.claims.
+    """
+    authorizer = event.get("requestContext", {}).get("authorizer", {}) or {}
+    jwt = authorizer.get("jwt", {}) or {}
+    claims = jwt.get("claims", {}) or {}
+    raw = claims.get("cognito:groups", "")
+    if isinstance(raw, list):
+        return [str(g) for g in raw]
+    if isinstance(raw, str):
+        # Can be JSON-serialized list string or comma/space separated string
+        s = raw.strip()
+        if s.startswith("[") and s.endswith("]"):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(g) for g in parsed]
+            except json.JSONDecodeError:
+                pass
+            s = s[1:-1]
+        return [g.strip() for g in s.replace(",", " ").split() if g.strip()]
+    return []
+
+
+def _is_admin(event: dict) -> bool:
+    return ADMIN_GROUP in _extract_groups(event)
+
 # Global (cross-app) configuration keys
 GLOBAL_CONFIG_KEYS = {
     "model_id": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -55,7 +87,13 @@ def update_config(event: dict) -> dict:
     - Global fields (model_id / temperature / ...)
     - apps: full replacement list of apps
     - Legacy per-app fields at top level (ignored; log warning)
+
+    Only users in the `admins` Cognito group may perform this action.
     """
+    if not _is_admin(event):
+        logger.warning("Non-admin attempted to update config: groups=%s", _extract_groups(event))
+        return error(403, "Only admins can modify system configuration")
+
     try:
         body = json.loads(event.get("body", "{}"))
     except json.JSONDecodeError:
