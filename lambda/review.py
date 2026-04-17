@@ -4,24 +4,64 @@ import json
 import logging
 
 import db
+import apps as apps_mod
 import models
 from aihelp_client import AIHelpClient
 from bedrock_client import query_knowledge_base
 from utils import now_ms, success, error, extract_username
 
+
+def _resolve_ticket_app(ticket_id: str, conversation: dict | None = None) -> dict | None:
+    """Figure out which app a ticket belongs to.
+
+    Priority:
+    1. conversation.appId (if provided)
+    2. ticket.appId
+    3. default_app_id from config
+    4. first enabled app
+    """
+    app_id = ""
+    if conversation and conversation.get("appId"):
+        app_id = conversation.get("appId") or ""
+    if not app_id:
+        ticket = db.get_ticket(ticket_id)
+        if ticket and ticket.get("appId"):
+            app_id = ticket.get("appId") or ""
+
+    apps_list = apps_mod.load_apps()
+    if app_id:
+        found = apps_mod.find_app_by_id(app_id, apps_list)
+        if found:
+            return found
+
+    default_id = db.get_config("default_app_id") or ""
+    if default_id:
+        found = apps_mod.find_app_by_id(default_id, apps_list)
+        if found:
+            return found
+
+    for app in apps_list:
+        if app.get("enabled", True):
+            return app
+    return None
+
 logger = logging.getLogger(__name__)
 
 
 def list_reviews(event: dict) -> dict:
-    """List reviews with optional status filter."""
+    """List reviews with optional status / app filter."""
     params = event.get("queryStringParameters") or {}
     status = params.get("status", "")
+    app_id = params.get("appId", "")
     page_size = int(params.get("pageSize", "50"))
 
     if status and status != "all":
         items, last_key = db.query_tickets_by_status(status, limit=page_size)
     else:
         items, last_key = db.scan_tickets(limit=page_size)
+
+    if app_id and app_id != "all":
+        items = [it for it in items if it.get("appId") == app_id]
 
     return success({
         "items": items,
@@ -118,15 +158,18 @@ def send_reply(event: dict) -> dict:
     if not final_answer:
         return error(400, "No answer to send")
 
-    # Get AIHelp config
-    config = db.get_all_config()
-    app_key = config.get("aihelp_app_key", "")
-    secret_key = config.get("aihelp_secret_key", "")
-    app_domain = config.get("aihelp_app_domain", "")
-    customer_login_name = config.get("aihelp_customer_login_name", "ai-assistant")
+    # Get AIHelp config (per-app)
+    app = _resolve_ticket_app(ticket_id, conversation)
+    if not app:
+        return error(400, "No app configured. Please add at least one app in settings.")
+
+    app_key = app.get("aihelp_app_key", "")
+    secret_key = app.get("aihelp_secret_key", "")
+    app_domain = app.get("aihelp_app_domain", "")
+    customer_login_name = app.get("aihelp_customer_login_name", "ai-assistant")
 
     if not all([app_key, secret_key, app_domain]):
-        return error(400, "AIHelp not configured. Please set appKey, secretKey, and appDomain in settings.")
+        return error(400, f"AIHelp not configured for app '{app.get('app_id')}'. Please set appKey, secretKey, and appDomain in settings.")
 
     # Send via AIHelp API
     client = AIHelpClient(app_key, secret_key, app_domain)
@@ -181,9 +224,11 @@ def regenerate_answer(event: dict) -> dict:
         return error(400, "No player message found to regenerate from")
 
     config = db.get_all_config()
+    app = _resolve_ticket_app(ticket_id)
+    kb_id = (app or {}).get("knowledge_base_id", "")
     ai_result = query_knowledge_base(
         question=player_message,
-        kb_id=config.get("knowledge_base_id"),
+        kb_id=kb_id,
         model_id=config.get("model_id"),
         system_prompt=config.get("system_prompt"),
     )
@@ -191,6 +236,7 @@ def regenerate_answer(event: dict) -> dict:
     # Save as new conversation record
     conversation = {
         "ticketId": ticket_id,
+        "appId": (app or {}).get("app_id", ""),
         "timestamp": now_ms(),
         "source": "manual",
         "webhookEvent": "regenerate",
@@ -200,7 +246,7 @@ def regenerate_answer(event: dict) -> dict:
         "retrievedChunks": ai_result["retrieved_chunks"],
         "aiLatencyMs": ai_result["latency_ms"],
         "aiModel": config.get("model_id", ""),
-        "aiKbId": config.get("knowledge_base_id", ""),
+        "aiKbId": kb_id,
         "reviewStatus": models.PENDING_REVIEW,
     }
     db.put_conversation(conversation)
