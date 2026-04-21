@@ -186,8 +186,17 @@ def send_reply(event: dict) -> dict:
                 "reviewedBy": username,
                 "reviewedAt": now_ms(),
             })
-            db.update_ticket(ticket_id, {"reviewStatus": models.SENT})
-            return success({"sent": True, "ticketId": ticket_id})
+            # Only roll up to ticket-level SENT when no other pending messages
+            # remain; otherwise keep the ticket as PENDING so reviewers still
+            # see it in their queue.
+            remaining = [
+                c for c in db.get_ticket_conversations(ticket_id)
+                if int(c.get("timestamp", 0)) != conv_timestamp
+                and c.get("reviewStatus") in (models.PENDING_REVIEW, models.APPROVED, models.EDITED)
+            ]
+            ticket_status = models.PENDING_REVIEW if remaining else models.SENT
+            db.update_ticket(ticket_id, {"reviewStatus": ticket_status})
+            return success({"sent": True, "ticketId": ticket_id, "timestamp": conv_timestamp})
         else:
             error_msg = result.get("message", "Unknown error")
             db.update_conversation(ticket_id, int(conversation["timestamp"]), {
@@ -207,7 +216,11 @@ def send_reply(event: dict) -> dict:
 
 
 def regenerate_answer(event: dict) -> dict:
-    """Re-generate AI answer for a ticket."""
+    """Re-generate AI answer for a ticket.
+
+    Starts a fresh Bedrock session but seeds the new session with local
+    conversation history so the new answer is aware of prior turns.
+    """
     ticket_id = event.get("pathParameters", {}).get("ticketId", "")
     if not ticket_id:
         return error(400, "Missing ticketId")
@@ -223,6 +236,17 @@ def regenerate_answer(event: dict) -> dict:
     if not player_message:
         return error(400, "No player message found to regenerate from")
 
+    # Build local conversation history (exclude the latest player message to
+    # avoid it being treated as history of itself)
+    history: list[dict] = []
+    for conv in conversations[:-1]:  # all but the current/latest
+        pm = conv.get("playerMessage")
+        if pm:
+            history.append({"role": "user", "content": pm})
+        reply = conv.get("sentAnswer") or conv.get("editedAnswer") or conv.get("aiAnswer")
+        if reply and conv.get("reviewStatus") == models.SENT:
+            history.append({"role": "assistant", "content": reply})
+
     config = db.get_all_config()
     app = _resolve_ticket_app(ticket_id)
     kb_id = (app or {}).get("knowledge_base_id", "")
@@ -231,6 +255,8 @@ def regenerate_answer(event: dict) -> dict:
         kb_id=kb_id,
         model_id=config.get("model_id"),
         system_prompt=config.get("system_prompt"),
+        session_id=None,  # fresh session on manual regenerate
+        conversation_history=history if history else None,
     )
 
     # Save as new conversation record
@@ -250,9 +276,12 @@ def regenerate_answer(event: dict) -> dict:
         "reviewStatus": models.PENDING_REVIEW,
     }
     db.put_conversation(conversation)
-    db.update_ticket(ticket_id, {
+    ticket_updates: dict = {
         "latestAiAnswer": ai_result["answer"][:500],
         "reviewStatus": models.PENDING_REVIEW,
-    })
+    }
+    if ai_result.get("session_id"):
+        ticket_updates["bedrockSessionId"] = ai_result["session_id"]
+    db.update_ticket(ticket_id, ticket_updates)
 
     return success(conversation)

@@ -125,7 +125,7 @@ def _handle_ticket_create(data: dict, event_time: int, app: dict | None) -> dict
     }
     db.put_ticket(ticket_info)
 
-    ai_result = {"answer": "", "sources": [], "retrieved_chunks": [], "latency_ms": 0}
+    ai_result = {"answer": "", "sources": [], "retrieved_chunks": [], "latency_ms": 0, "session_id": ""}
     if auto_generate and kb_id:
         ai_result = query_knowledge_base(
             question=player_message,
@@ -157,8 +157,13 @@ def _handle_ticket_create(data: dict, event_time: int, app: dict | None) -> dict
     }
     db.put_conversation(conversation)
 
+    ticket_updates: dict[str, Any] = {}
     if ai_result["answer"]:
-        db.update_ticket(ticket_id, {"latestAiAnswer": ai_result["answer"][:500]})
+        ticket_updates["latestAiAnswer"] = ai_result["answer"][:500]
+    if ai_result.get("session_id"):
+        ticket_updates["bedrockSessionId"] = ai_result["session_id"]
+    if ticket_updates:
+        db.update_ticket(ticket_id, ticket_updates)
 
     logger.info(f"Processed ticketCreate: {ticket_id}, app={app_id}, AI answer: {len(ai_result['answer'])} chars")
     return success({"received": True, "ticketId": ticket_id, "appId": app_id, "aiGenerated": bool(ai_result["answer"])})
@@ -187,13 +192,29 @@ def _handle_new_message(data: dict, event_time: int, app: dict | None) -> dict:
     kb_id = (app or {}).get("knowledge_base_id", "")
     app_id = (app or {}).get("app_id", "")
 
-    ai_result = {"answer": "", "sources": [], "retrieved_chunks": [], "latency_ms": 0}
+    # Reuse Bedrock session for multi-turn context; fall back to local history
+    session_id = (existing or {}).get("bedrockSessionId") or None
+    history: list[dict] = []
+    if not session_id:
+        # First multi-turn call without a live session -> seed with local history
+        prior = db.get_ticket_conversations(ticket_id)
+        for conv in prior:
+            pm = conv.get("playerMessage")
+            if pm:
+                history.append({"role": "user", "content": pm})
+            reply = conv.get("sentAnswer") or conv.get("editedAnswer") or conv.get("aiAnswer")
+            if reply and conv.get("reviewStatus") == models.SENT:
+                history.append({"role": "assistant", "content": reply})
+
+    ai_result = {"answer": "", "sources": [], "retrieved_chunks": [], "latency_ms": 0, "session_id": ""}
     if auto_generate and kb_id:
         ai_result = query_knowledge_base(
             question=player_message,
             kb_id=kb_id,
             model_id=globals_cfg.get("model_id"),
             system_prompt=globals_cfg.get("system_prompt"),
+            session_id=session_id,
+            conversation_history=history if history else None,
         )
 
     conversation = {
@@ -222,6 +243,8 @@ def _handle_new_message(data: dict, event_time: int, app: dict | None) -> dict:
     }
     if ai_result["answer"]:
         updates["latestAiAnswer"] = ai_result["answer"][:500]
+    if ai_result.get("session_id"):
+        updates["bedrockSessionId"] = ai_result["session_id"]
 
     if existing:
         updates["conversationCount"] = int(existing.get("conversationCount", 0)) + 1

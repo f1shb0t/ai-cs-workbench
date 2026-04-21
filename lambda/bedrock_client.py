@@ -74,10 +74,24 @@ def query_knowledge_base(
     kb_id: str | None = None,
     model_id: str | None = None,
     system_prompt: str | None = None,
+    session_id: str | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> dict:
     """
     Query Bedrock Knowledge Base using RetrieveAndGenerate API,
     and also call Retrieve API for raw chunks.
+
+    Args:
+        question: current user question.
+        kb_id: Knowledge Base ID.
+        model_id: inference profile or foundation model id.
+        system_prompt: custom prompt template (optional).
+        session_id: Bedrock RetrieveAndGenerate sessionId for multi-turn. When
+            provided, Bedrock keeps server-side conversation history. Pass None
+            to start a new session.
+        conversation_history: Optional fallback history [{role, content}, ...]
+            used to prepend context into the prompt. Only applied when
+            session_id is None (e.g. regenerate / new ticket with prior turns).
 
     Returns:
         {
@@ -85,6 +99,7 @@ def query_knowledge_base(
             "sources": [{"uri": str, "snippet": str}],
             "retrieved_chunks": [{"content": str, "score": float, "uri": str}],
             "latency_ms": int,
+            "session_id": str,  # new or refreshed session id
         }
     """
     kb_id = kb_id or os.environ.get("KNOWLEDGE_BASE_ID", "")
@@ -98,6 +113,7 @@ def query_knowledge_base(
             "sources": [],
             "retrieved_chunks": [],
             "latency_ms": 0,
+            "session_id": session_id or "",
         }
 
     # Build model ARN
@@ -117,6 +133,31 @@ def query_knowledge_base(
         # Step 1: Retrieve raw chunks (for display)
         retrieved_chunks = retrieve_chunks(question, kb_id, num_results=5)
 
+        # Build effective system prompt. If we don't have a live Bedrock session
+        # but do have local history, embed it so the model has context.
+        effective_system_prompt = system_prompt or ""
+        if not session_id and conversation_history:
+            history_lines = []
+            for turn in conversation_history:
+                role = turn.get("role", "")
+                content = (turn.get("content") or "").strip()
+                if not content:
+                    continue
+                if role == "user":
+                    history_lines.append(f"玩家: {content}")
+                elif role == "assistant":
+                    history_lines.append(f"客服: {content}")
+            if history_lines:
+                history_block = "\n".join(history_lines)
+                context_hint = (
+                    "以下是本工单此前的对话历史，请在回答当前问题时参考上下文，"
+                    "但不要直接复述历史内容：\n"
+                    f"{history_block}\n"
+                )
+                effective_system_prompt = (
+                    f"{effective_system_prompt}\n\n{context_hint}".strip()
+                )
+
         # Step 2: RetrieveAndGenerate for answer
         request_params: dict[str, Any] = {
             "input": {"text": question},
@@ -134,21 +175,35 @@ def query_knowledge_base(
             },
         }
 
+        # Reuse server-side Bedrock session when available
+        if session_id:
+            request_params["sessionId"] = session_id
+
         # Add generation configuration with system prompt if provided
-        if system_prompt:
+        if effective_system_prompt:
             request_params["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"][
                 "generationConfiguration"
             ] = {
                 "promptTemplate": {
-                    "textPromptTemplate": f"{system_prompt}\n\nContext: $search_results$\n\nQuestion: $query$\n\nAnswer:"
+                    "textPromptTemplate": f"{effective_system_prompt}\n\nContext: $search_results$\n\nQuestion: $query$\n\nAnswer:"
                 }
             }
 
-        response = bedrock_agent_runtime.retrieve_and_generate(**request_params)
+        try:
+            response = bedrock_agent_runtime.retrieve_and_generate(**request_params)
+        except bedrock_agent_runtime.exceptions.ValidationException as e:
+            # sessionId expired / invalid - retry without it
+            if session_id and "session" in str(e).lower():
+                logger.warning(f"Bedrock session {session_id} invalid, restarting: {e}")
+                request_params.pop("sessionId", None)
+                response = bedrock_agent_runtime.retrieve_and_generate(**request_params)
+            else:
+                raise
 
         latency_ms = int((time.time() - start_time) * 1000)
 
         answer = response.get("output", {}).get("text", "")
+        new_session_id = response.get("sessionId", "") or session_id or ""
 
         # Extract citations/sources
         sources = []
@@ -165,13 +220,14 @@ def query_knowledge_base(
                 if source_info["uri"] and source_info not in sources:
                     sources.append(source_info)
 
-        logger.info(f"Bedrock KB query completed in {latency_ms}ms, {len(sources)} sources, {len(retrieved_chunks)} chunks")
+        logger.info(f"Bedrock KB query completed in {latency_ms}ms, {len(sources)} sources, {len(retrieved_chunks)} chunks, session={new_session_id[:12] if new_session_id else 'new'}")
 
         return {
             "answer": answer,
             "sources": sources,
             "retrieved_chunks": retrieved_chunks,
             "latency_ms": latency_ms,
+            "session_id": new_session_id,
         }
 
     except Exception as e:
@@ -182,4 +238,5 @@ def query_knowledge_base(
             "sources": [],
             "retrieved_chunks": [],
             "latency_ms": latency_ms,
+            "session_id": session_id or "",
         }
