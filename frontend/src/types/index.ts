@@ -86,6 +86,12 @@ export interface AppEntry {
   aihelp_app_domain: string;
   aihelp_customer_login_name: string;
   knowledge_base_id: string;
+  /**
+   * Per-app system prompt override. When non-empty it replaces the global
+   * system_prompt for this app's AI generations. Leave empty to inherit the
+   * global prompt.
+   */
+  system_prompt?: string;
   enabled: boolean;
 }
 

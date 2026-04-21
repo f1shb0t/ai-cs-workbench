@@ -131,7 +131,7 @@ def _handle_ticket_create(data: dict, event_time: int, app: dict | None) -> dict
             question=player_message,
             kb_id=kb_id,
             model_id=globals_cfg.get("model_id"),
-            system_prompt=globals_cfg.get("system_prompt"),
+            system_prompt=apps_mod.effective_system_prompt(app, globals_cfg.get("system_prompt")),
         )
     elif auto_generate and not kb_id:
         logger.warning(f"No KB configured for app={app_id}; skipping AI generation")
@@ -211,7 +211,7 @@ def _handle_new_message(data: dict, event_time: int, app: dict | None) -> dict:
             question=player_message,
             kb_id=kb_id,
             model_id=globals_cfg.get("model_id"),
-            system_prompt=globals_cfg.get("system_prompt"),
+            system_prompt=apps_mod.effective_system_prompt(app, globals_cfg.get("system_prompt")),
             conversation_history=history if history else None,
         )
 

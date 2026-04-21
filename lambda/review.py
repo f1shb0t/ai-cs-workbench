@@ -254,7 +254,7 @@ def regenerate_answer(event: dict) -> dict:
         question=player_message,
         kb_id=kb_id,
         model_id=config.get("model_id"),
-        system_prompt=config.get("system_prompt"),
+        system_prompt=apps_mod.effective_system_prompt(app, config.get("system_prompt")),
         session_id=None,  # fresh session on manual regenerate
         conversation_history=history if history else None,
     )

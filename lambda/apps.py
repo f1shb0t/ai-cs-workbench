@@ -26,6 +26,7 @@ APP_FIELDS = [
     "aihelp_app_domain",
     "aihelp_customer_login_name",
     "knowledge_base_id",
+    "system_prompt",  # optional per-app override; empty string = inherit global
     "enabled",
 ]
 
@@ -48,8 +49,21 @@ def _default_app() -> dict:
         "aihelp_app_domain": "",
         "aihelp_customer_login_name": "ai-assistant",
         "knowledge_base_id": "",
+        "system_prompt": "",
         "enabled": True,
     }
+
+
+def effective_system_prompt(app: dict | None, global_prompt: str | None) -> str:
+    """Return the prompt to use for a given app.
+
+    Per-app system_prompt overrides the global one when non-empty.
+    """
+    if app:
+        app_prompt = (app.get("system_prompt") or "").strip()
+        if app_prompt:
+            return app_prompt
+    return (global_prompt or "").strip()
 
 
 def load_apps() -> list[dict]:

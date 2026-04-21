@@ -47,6 +47,7 @@ const emptyApp = (): AppEntry => ({
   aihelp_app_domain: '',
   aihelp_customer_login_name: 'ai-assistant',
   knowledge_base_id: '',
+  system_prompt: '',
   enabled: true,
 });
 
@@ -243,6 +244,17 @@ const Settings: React.FC = () => {
               render: (v: string) => <code>{v || '-'}</code>,
             },
             {
+              title: '提示词',
+              dataIndex: 'system_prompt',
+              width: 90,
+              render: (v?: string) =>
+                v && v.trim() ? (
+                  <Tag color="purple">自定义</Tag>
+                ) : (
+                  <Tag>沿用全局</Tag>
+                ),
+            },
+            {
               title: '状态',
               dataIndex: 'enabled',
               width: 80,
@@ -408,6 +420,16 @@ const Settings: React.FC = () => {
             rules={[{ required: true, message: '请输入 Knowledge Base ID' }]}
           >
             <Input placeholder="输入 Bedrock Knowledge Base ID" />
+          </Form.Item>
+          <Form.Item
+            label="系统提示词（可选）"
+            name="system_prompt"
+            extra="留空则沿用「全局 AI 配置」中的提示词。填写后仅对此 App 生效，可用于定制回复语气、角色设定等。"
+          >
+            <Input.TextArea
+              rows={5}
+              placeholder={'例如：你是一个活泼可爱的少女客服，回答要简短活泼，多用 emoji 😊...\n\n留空则使用全局提示词'}
+            />
           </Form.Item>
           <Form.Item label="启用" name="enabled" valuePropName="checked">
             <Switch checkedChildren="启用" unCheckedChildren="禁用" />
