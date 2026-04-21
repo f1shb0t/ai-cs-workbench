@@ -192,19 +192,18 @@ def _handle_new_message(data: dict, event_time: int, app: dict | None) -> dict:
     kb_id = (app or {}).get("knowledge_base_id", "")
     app_id = (app or {}).get("app_id", "")
 
-    # Reuse Bedrock session for multi-turn context; fall back to local history
-    session_id = (existing or {}).get("bedrockSessionId") or None
+    # Always build conversation history from local DB and inject into prompt.
+    # We no longer rely on Bedrock sessionId because it can stick fallback
+    # rejections (e.g. "Sorry, I am unable to assist") across turns.
     history: list[dict] = []
-    if not session_id:
-        # First multi-turn call without a live session -> seed with local history
-        prior = db.get_ticket_conversations(ticket_id)
-        for conv in prior:
-            pm = conv.get("playerMessage")
-            if pm:
-                history.append({"role": "user", "content": pm})
-            reply = conv.get("sentAnswer") or conv.get("editedAnswer") or conv.get("aiAnswer")
-            if reply and conv.get("reviewStatus") == models.SENT:
-                history.append({"role": "assistant", "content": reply})
+    prior = db.get_ticket_conversations(ticket_id)
+    for conv in prior:
+        pm = conv.get("playerMessage")
+        if pm:
+            history.append({"role": "user", "content": pm})
+        reply = conv.get("sentAnswer") or conv.get("editedAnswer") or conv.get("aiAnswer")
+        if reply and conv.get("reviewStatus") == models.SENT:
+            history.append({"role": "assistant", "content": reply})
 
     ai_result = {"answer": "", "sources": [], "retrieved_chunks": [], "latency_ms": 0, "session_id": ""}
     if auto_generate and kb_id:
@@ -213,7 +212,6 @@ def _handle_new_message(data: dict, event_time: int, app: dict | None) -> dict:
             kb_id=kb_id,
             model_id=globals_cfg.get("model_id"),
             system_prompt=globals_cfg.get("system_prompt"),
-            session_id=session_id,
             conversation_history=history if history else None,
         )
 

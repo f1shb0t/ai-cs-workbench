@@ -81,17 +81,23 @@ def query_knowledge_base(
     Query Bedrock Knowledge Base using RetrieveAndGenerate API,
     and also call Retrieve API for raw chunks.
 
+    Multi-turn context strategy:
+        We deliberately DO NOT use Bedrock's native sessionId mechanism for
+        multi-turn because in practice it "sticks" previous-turn fallback
+        states (e.g. a "Sorry, I am unable to assist" rejection in turn 1
+        poisons turn 2). Instead we inject conversation_history into the
+        prompt template ourselves, which is observable, debuggable, and
+        stateless. session_id is retained in the signature/return value for
+        backward compatibility and UI tracking but is not sent to Bedrock.
+
     Args:
         question: current user question.
         kb_id: Knowledge Base ID.
         model_id: inference profile or foundation model id.
         system_prompt: custom prompt template (optional).
-        session_id: Bedrock RetrieveAndGenerate sessionId for multi-turn. When
-            provided, Bedrock keeps server-side conversation history. Pass None
-            to start a new session.
-        conversation_history: Optional fallback history [{role, content}, ...]
-            used to prepend context into the prompt. Only applied when
-            session_id is None (e.g. regenerate / new ticket with prior turns).
+        session_id: retained for compatibility; no longer passed to Bedrock.
+        conversation_history: [{role:'user'|'assistant', content: str}, ...]
+            injected into the prompt as prior-turn context.
 
     Returns:
         {
@@ -99,7 +105,7 @@ def query_knowledge_base(
             "sources": [{"uri": str, "snippet": str}],
             "retrieved_chunks": [{"content": str, "score": float, "uri": str}],
             "latency_ms": int,
-            "session_id": str,  # new or refreshed session id
+            "session_id": str,  # echoed back; may be empty
         }
     """
     kb_id = kb_id or os.environ.get("KNOWLEDGE_BASE_ID", "")
@@ -133,10 +139,12 @@ def query_knowledge_base(
         # Step 1: Retrieve raw chunks (for display)
         retrieved_chunks = retrieve_chunks(question, kb_id, num_results=5)
 
-        # Build effective system prompt. If we don't have a live Bedrock session
-        # but do have local history, embed it so the model has context.
+        # Build effective system prompt. We always embed local conversation
+        # history (when available) instead of relying on Bedrock sessionId,
+        # because sessionId can lock in prior-turn fallback states like
+        # "Sorry, I am unable to assist" that then poison later turns.
         effective_system_prompt = system_prompt or ""
-        if not session_id and conversation_history:
+        if conversation_history:
             history_lines = []
             for turn in conversation_history:
                 role = turn.get("role", "")
@@ -159,6 +167,8 @@ def query_knowledge_base(
                 )
 
         # Step 2: RetrieveAndGenerate for answer
+        # NOTE: we intentionally do NOT pass sessionId; multi-turn context is
+        # handled via prompt injection above.
         request_params: dict[str, Any] = {
             "input": {"text": question},
             "retrieveAndGenerateConfiguration": {
@@ -175,10 +185,6 @@ def query_knowledge_base(
             },
         }
 
-        # Reuse server-side Bedrock session when available
-        if session_id:
-            request_params["sessionId"] = session_id
-
         # Add generation configuration with system prompt if provided
         if effective_system_prompt:
             request_params["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"][
@@ -189,21 +195,14 @@ def query_knowledge_base(
                 }
             }
 
-        try:
-            response = bedrock_agent_runtime.retrieve_and_generate(**request_params)
-        except bedrock_agent_runtime.exceptions.ValidationException as e:
-            # sessionId expired / invalid - retry without it
-            if session_id and "session" in str(e).lower():
-                logger.warning(f"Bedrock session {session_id} invalid, restarting: {e}")
-                request_params.pop("sessionId", None)
-                response = bedrock_agent_runtime.retrieve_and_generate(**request_params)
-            else:
-                raise
+        response = bedrock_agent_runtime.retrieve_and_generate(**request_params)
 
         latency_ms = int((time.time() - start_time) * 1000)
 
         answer = response.get("output", {}).get("text", "")
-        new_session_id = response.get("sessionId", "") or session_id or ""
+        # Not using Bedrock server-side session; keep whatever the caller
+        # passed (for future analytics) or empty.
+        new_session_id = session_id or ""
 
         # Extract citations/sources
         sources = []
