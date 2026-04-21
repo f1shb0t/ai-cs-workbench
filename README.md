@@ -33,8 +33,12 @@ DynamoDB     Bedrock  │  AIHelp API   Cognito
 ## 核心功能
 
 - **多 App 配置** — 支持多个游戏/产品来源，每个来源独立配置 AppKey / SecretKey / AppDomain / Knowledge Base
+- **每 App 独立提示词** — 可选的 App 级 System Prompt，覆盖全局（不同游戏不同语气）
 - **Webhook 自动接收** — AIHelp 客诉自动推送到工作台，按 `appId` 路由到对应配置
 - **AI 自动生成回答** — 基于 Bedrock Knowledge Base 的 RAG 问答
+- **对话记忆** — 多轮追问时自动注入历史对话上下文，无状态可观测
+- **气泡式对话 UI** — 工单详情按时间线展示对话流，每条 AI 回复独立审核/发送
+- **详情页自动刷新** — 选中工单时每 8s 轮询，玩家新消息自动出现（编辑时暂停）
 - **知识库召回片段** — 展示每次检索的匹配问题、知识片段及置信度分数
 - **Human-in-the-loop 审核** — 客服可确认/编辑/拒绝/重新生成 AI 答案
 - **一键回复** — 审核通过后直接通过 AIHelp API 回复玩家
@@ -345,13 +349,16 @@ aws cognito-idp admin-remove-user-from-group \
 
 ### 对话记忆（v2 新增）
 
-AI 现在具备多轮对话上下文感知能力，适用于玩家连续追问场景：
+AI 具备多轮对话上下文感知能力，适用于玩家连续追问场景：
 
-- 使用 **Bedrock RetrieveAndGenerate 原生 sessionId** 维持服务端会话
-- 工单首条消息开启新 session，后续消息携带 sessionId 调用
-- sessionId 存储在 ticket 表的 `bedrockSessionId` 字段（DynamoDB schemaless，无需 schema 迁移）
-- sessionId 过期时（Bedrock 限制一定时间）自动降级新开 session
-- 无 session 时，后端把已发送的历史对话注入 prompt 作为兜底上下文
+- 每次调用 Bedrock 前，从 DynamoDB 拉取本工单完整对话历史
+- 以结构化形式（`玩家: xxx` / `客服: yyy`）注入 System Prompt
+- 每次调用都是**无状态**的，不会被旧的 fallback / 拒绝状态污染
+- 完全可观测：prompt 内容可从 CloudWatch 日志直接查看调试
+
+> **设计说明**：早期版本尝试使用 Bedrock RetrieveAndGenerate 的原生 sessionId 维持服务端会话，但实际运行发现一旦某轮返回 fallback（如 "Sorry, I am unable to assist..."），该 session 内后续所有请求都会被污染返回同样的拒绝回复。改为 prompt 注入后问题消失。
+>
+> `bedrockSessionId` 字段仍保留写入 ticket 表作为 conversation trace id，用于未来其他追踪场景，但不再传递给 Bedrock。
 
 **效果示例**：
 ```
@@ -361,7 +368,13 @@ AI:   你可以通过 X 渠道提交申诉...
 AI:   通常在 48 小时内...
 ```
 
-重新生成（regenerate）会**开启新 session** 但**注入本地历史**，避免受旧上下文干扰同时保留对话连续性。
+### 详情页自动刷新（v2 新增）
+
+工单详情页独立轮询（8s 间隔），玩家追问时自动显示新气泡，无需手动切换工单：
+
+- 轮询前 shallow compare（长度 + 末条 timestamp + 每条状态），无变化不触发 re-render
+- **编辑态保护**：用户正在编辑某条 AI 回复时，轮询自动暂停，避免刷新清掉未保存的草稿
+- 后台刷新失败不弹 toast，只 `console.warn`，不打扰使用
 
 ### 数据看板
 
