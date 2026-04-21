@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Row, Col, message } from 'antd';
 import TicketList from './TicketList';
 import TicketDetail from './TicketDetail';
@@ -15,6 +15,12 @@ const Workbench: React.FC = () => {
   const [apps, setApps] = useState<AppEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  // Whether any AI bubble is currently being edited. Used to pause detail
+  // polling so live refresh doesn't wipe out unsaved edits.
+  const editingRef = useRef(false);
+  const setEditingActive = useCallback((active: boolean) => {
+    editingRef.current = active;
+  }, []);
 
   useEffect(() => {
     getConfig()
@@ -39,6 +45,46 @@ const Workbench: React.FC = () => {
   }, [statusFilter, appFilter]);
 
   usePolling(fetchTickets, 10000);
+
+  // Silent refresh of the currently open ticket's conversations.
+  // Skips when user is editing an AI bubble to avoid clobbering unsaved work.
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedTicket?.ticketId ?? null;
+
+  const refreshDetailSilently = useCallback(async () => {
+    const ticketId = selectedIdRef.current;
+    if (!ticketId) return;
+    if (editingRef.current) return; // pause while editing
+    try {
+      const result = await getTicketConversations(ticketId);
+      setConversations((prev) => {
+        // Shallow compare: same length + same last timestamp + same statuses
+        // means nothing meaningful changed; skip state update to avoid
+        // unnecessary re-renders.
+        const next = result.conversations;
+        if (
+          prev.length === next.length &&
+          prev.length > 0 &&
+          prev[prev.length - 1].timestamp === next[next.length - 1].timestamp &&
+          prev.every((c, i) => c.reviewStatus === next[i].reviewStatus)
+        ) {
+          return prev;
+        }
+        return next;
+      });
+      // Also update ticket header (status, latest message) if changed
+      if (result.ticket) {
+        setSelectedTicket((prev) =>
+          prev && prev.ticketId === result.ticket.ticketId ? { ...prev, ...result.ticket } : prev,
+        );
+      }
+    } catch (err) {
+      // Silent — don't spam toasts on transient errors during background poll
+      console.warn('Detail refresh failed:', err);
+    }
+  }, []);
+
+  usePolling(refreshDetailSilently, 8000, !!selectedTicket);
 
   const handleStatusFilterChange = (status: string) => {
     setStatusFilter(status);
@@ -97,6 +143,7 @@ const Workbench: React.FC = () => {
           conversations={conversations}
           loading={detailLoading}
           onRefresh={handleRefresh}
+          onEditingChange={setEditingActive}
         />
       </Col>
     </Row>

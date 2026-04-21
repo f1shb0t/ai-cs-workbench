@@ -34,6 +34,8 @@ interface Props {
   conversations: Conversation[];
   loading: boolean;
   onRefresh: () => void;
+  /** Notify parent when user enters/exits edit mode on any AI bubble. */
+  onEditingChange?: (editing: boolean) => void;
 }
 
 type BubbleStatus = 'pending' | 'sent' | 'rejected' | 'failed' | 'noanswer';
@@ -124,9 +126,10 @@ interface AIBubbleProps {
   ticket: Ticket;
   conv: Conversation;
   onRefresh: () => void;
+  onEditingChange?: (editing: boolean) => void;
 }
 
-const AIBubble: React.FC<AIBubbleProps> = ({ ticket, conv, onRefresh }) => {
+const AIBubble: React.FC<AIBubbleProps> = ({ ticket, conv, onRefresh, onEditingChange }) => {
   const status = bubbleStatusOf(conv);
   const baseAnswer = conv.sentAnswer || conv.editedAnswer || conv.aiAnswer || '';
 
@@ -134,6 +137,14 @@ const AIBubble: React.FC<AIBubbleProps> = ({ ticket, conv, onRefresh }) => {
   const [draft, setDraft] = useState(baseAnswer);
   const [sending, setSending] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+
+  // Propagate editing state up so parent can pause background polling
+  useEffect(() => {
+    onEditingChange?.(editing);
+    return () => {
+      if (editing) onEditingChange?.(false);
+    };
+  }, [editing, onEditingChange]);
 
   useEffect(() => {
     // Reset local draft when underlying conversation changes
@@ -410,7 +421,7 @@ const PlayerBubble: React.FC<PlayerBubbleProps> = ({ playerName, playerMessage, 
   );
 };
 
-const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefresh }) => {
+const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefresh, onEditingChange }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [regenerating, setRegenerating] = useState(false);
 
@@ -509,10 +520,20 @@ const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefre
                   />
                 )}
                 {(conv.aiAnswer || conv.editedAnswer || conv.sentAnswer) && (
-                  <AIBubble ticket={ticket} conv={conv} onRefresh={onRefresh} />
+                  <AIBubble
+                    ticket={ticket}
+                    conv={conv}
+                    onRefresh={onRefresh}
+                    onEditingChange={onEditingChange}
+                  />
                 )}
                 {!conv.aiAnswer && !conv.editedAnswer && conv.reviewStatus === 'no_answer' && (
-                  <AIBubble ticket={ticket} conv={conv} onRefresh={onRefresh} />
+                  <AIBubble
+                    ticket={ticket}
+                    conv={conv}
+                    onRefresh={onRefresh}
+                    onEditingChange={onEditingChange}
+                  />
                 )}
               </React.Fragment>
             ))
