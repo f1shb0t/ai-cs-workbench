@@ -1,17 +1,31 @@
-import React, { useState } from 'react';
-import { Card, Typography, Tag, Space, Button, Input, Divider, Timeline, Collapse, Empty, Spin, message, Descriptions } from 'antd';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import {
+  Avatar,
+  Button,
+  Card,
+  Collapse,
+  Descriptions,
+  Empty,
+  Input,
+  Space,
+  Spin,
+  Tag,
+  Tooltip,
+  Typography,
+  message,
+} from 'antd';
 import {
   CheckCircleOutlined,
-  ReloadOutlined,
   CloseCircleOutlined,
-  SendOutlined,
   EditOutlined,
+  ReloadOutlined,
   RobotOutlined,
-  UserOutlined,
+  SaveOutlined,
+  SendOutlined,
 } from '@ant-design/icons';
-import type { Ticket, Conversation } from '../../types';
-import { updateReview, sendReply, regenerateAnswer } from '../../services/api';
-import { statusColor, statusText, formatTime, platformText } from '../../utils';
+import type { Conversation, RetrievedChunk, Ticket } from '../../types';
+import { regenerateAnswer, sendReply, updateReview } from '../../services/api';
+import { formatTime, platformText, statusColor, statusText } from '../../utils';
 
 const { TextArea } = Input;
 
@@ -22,38 +36,146 @@ interface Props {
   onRefresh: () => void;
 }
 
-const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefresh }) => {
-  const [editedAnswer, setEditedAnswer] = useState('');
+type BubbleStatus = 'pending' | 'sent' | 'rejected' | 'failed' | 'noanswer';
+
+function bubbleStatusOf(conv: Conversation): BubbleStatus {
+  const rs = conv.reviewStatus;
+  if (rs === 'sent') return 'sent';
+  if (rs === 'rejected') return 'rejected';
+  if (rs === 'send_failed') return 'failed';
+  if (rs === 'no_answer') return 'noanswer';
+  return 'pending';
+}
+
+/** Chunks collapsible block reused for each AI bubble. */
+const ChunksBlock: React.FC<{ chunks?: RetrievedChunk[] }> = ({ chunks }) => {
+  if (!chunks || chunks.length === 0) return null;
+  return (
+    <Collapse
+      size="small"
+      ghost
+      style={{ marginTop: 6 }}
+      items={[
+        {
+          key: 'chunks',
+          label: (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              📚 引用了 {chunks.length} 条知识
+            </Typography.Text>
+          ),
+          children: chunks.map((chunk, i) => {
+            const metaAnswer = chunk.metadata?.Answer || chunk.metadata?.answer || '';
+            const question = chunk.question || (metaAnswer ? chunk.content : '');
+            const answer = chunk.answer || metaAnswer || '';
+            const displayContent = answer || chunk.content || '';
+            return (
+              <Card
+                key={i}
+                size="small"
+                style={{ marginBottom: 6, backgroundColor: '#fafafa' }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Tag
+                    color={
+                      chunk.score >= 0.7 ? 'green' : chunk.score >= 0.4 ? 'orange' : 'red'
+                    }
+                  >
+                    置信度: {(chunk.score * 100).toFixed(1)}%
+                  </Tag>
+                  {chunk.uri && (
+                    <Typography.Text type="secondary" style={{ fontSize: 11 }} ellipsis>
+                      {chunk.uri.split('/').pop()}
+                    </Typography.Text>
+                  )}
+                </div>
+                {question && (
+                  <div style={{ marginBottom: 6 }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      📋 匹配问题：
+                    </Typography.Text>
+                    <Typography.Paragraph
+                      style={{ fontSize: 13, margin: '2px 0 0', color: '#595959' }}
+                    >
+                      {question}
+                    </Typography.Paragraph>
+                  </div>
+                )}
+                <div>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    💡 知识片段：
+                  </Typography.Text>
+                  <Typography.Paragraph
+                    style={{ fontSize: 13, margin: '2px 0 0', whiteSpace: 'pre-wrap' }}
+                    ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}
+                  >
+                    {displayContent}
+                  </Typography.Paragraph>
+                </div>
+              </Card>
+            );
+          }),
+        },
+      ]}
+    />
+  );
+};
+
+interface AIBubbleProps {
+  ticket: Ticket;
+  conv: Conversation;
+  onRefresh: () => void;
+}
+
+const AIBubble: React.FC<AIBubbleProps> = ({ ticket, conv, onRefresh }) => {
+  const status = bubbleStatusOf(conv);
+  const baseAnswer = conv.sentAnswer || conv.editedAnswer || conv.aiAnswer || '';
+
   const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(baseAnswer);
   const [sending, setSending] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
 
-  if (!ticket) {
-    return (
-      <Card style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Empty description="请从左侧选择一个工单" />
-      </Card>
-    );
-  }
+  useEffect(() => {
+    // Reset local draft when underlying conversation changes
+    setDraft(conv.editedAnswer || conv.aiAnswer || '');
+    setEditing(false);
+  }, [conv.timestamp, conv.editedAnswer, conv.aiAnswer]);
 
-  const latestConversation = conversations.length > 0 ? conversations[conversations.length - 1] : null;
-  const currentAnswer = editing ? editedAnswer : (latestConversation?.editedAnswer || latestConversation?.aiAnswer || '');
-  const isPending = latestConversation?.reviewStatus === 'pending_review';
+  const startEdit = () => {
+    setDraft(conv.editedAnswer || conv.aiAnswer || '');
+    setEditing(true);
+  };
 
-  const handleApproveAndSend = async () => {
-    if (!latestConversation) return;
-    setSending(true);
+  const saveEdit = async () => {
     try {
-      if (editing && editedAnswer !== latestConversation.aiAnswer) {
-        await updateReview(ticket.ticketId, latestConversation.timestamp, 'edited', editedAnswer);
-      } else {
-        await updateReview(ticket.ticketId, latestConversation.timestamp, 'approved');
-      }
-      await sendReply(ticket.ticketId, latestConversation.timestamp);
-      message.success('回复已发送');
+      await updateReview(ticket.ticketId, conv.timestamp, 'edited', draft);
+      message.success('已保存');
       setEditing(false);
       onRefresh();
-    } catch (err) {
+    } catch {
+      message.error('保存失败');
+    }
+  };
+
+  const cancelEdit = () => {
+    setDraft(conv.editedAnswer || conv.aiAnswer || '');
+    setEditing(false);
+  };
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      // If the user has edits they haven't saved, persist them first
+      if (editing && draft !== (conv.editedAnswer || conv.aiAnswer || '')) {
+        await updateReview(ticket.ticketId, conv.timestamp, 'edited', draft);
+      } else if (!editing && !conv.editedAnswer) {
+        await updateReview(ticket.ticketId, conv.timestamp, 'approved');
+      }
+      await sendReply(ticket.ticketId, conv.timestamp);
+      message.success('已发送');
+      setEditing(false);
+      onRefresh();
+    } catch {
       message.error('发送失败');
     } finally {
       setSending(false);
@@ -61,12 +183,11 @@ const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefre
   };
 
   const handleReject = async () => {
-    if (!latestConversation) return;
     try {
-      await updateReview(ticket.ticketId, latestConversation.timestamp, 'rejected');
+      await updateReview(ticket.ticketId, conv.timestamp, 'rejected');
       message.success('已拒绝');
       onRefresh();
-    } catch (err) {
+    } catch {
       message.error('操作失败');
     }
   };
@@ -76,25 +197,274 @@ const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefre
     try {
       await regenerateAnswer(ticket.ticketId);
       message.success('已重新生成');
-      setEditing(false);
       onRefresh();
-    } catch (err) {
+    } catch {
       message.error('重新生成失败');
     } finally {
       setRegenerating(false);
     }
   };
 
-  const startEditing = () => {
-    setEditedAnswer(currentAnswer);
-    setEditing(true);
+  // Status-driven styles
+  const bubbleStyle: React.CSSProperties = (() => {
+    switch (status) {
+      case 'sent':
+        return { backgroundColor: '#f6ffed', border: '1px solid #b7eb8f' };
+      case 'rejected':
+        return {
+          backgroundColor: '#f5f5f5',
+          border: '1px dashed #bfbfbf',
+          opacity: 0.7,
+          textDecoration: 'line-through',
+        };
+      case 'failed':
+        return { backgroundColor: '#fff1f0', border: '1px solid #ffa39e' };
+      case 'noanswer':
+        return { backgroundColor: '#fafafa', border: '1px dashed #d9d9d9' };
+      default:
+        return { backgroundColor: '#e6f4ff', border: '1px solid #91caff' };
+    }
+  })();
+
+  const displayAnswer = editing
+    ? draft
+    : conv.sentAnswer || conv.editedAnswer || conv.aiAnswer || '(暂无 AI 回答)';
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+      <div style={{ maxWidth: '78%', display: 'flex', flexDirection: 'row-reverse', gap: 8 }}>
+        <Avatar
+          size={36}
+          icon={<RobotOutlined />}
+          style={{ backgroundColor: '#1677ff', flexShrink: 0 }}
+        />
+        <div style={{ flex: 1 }}>
+          <div
+            style={{
+              textAlign: 'right',
+              fontSize: 11,
+              color: '#8c8c8c',
+              marginBottom: 4,
+            }}
+          >
+            {conv.source === 'manual' ? '🔄 重新生成' : 'AI 客服'}
+            {conv.aiLatencyMs ? ` · ${(conv.aiLatencyMs / 1000).toFixed(1)}s` : ''}
+            {' · '}
+            {formatTime(conv.timestamp)}
+          </div>
+
+          <div
+            style={{
+              ...bubbleStyle,
+              borderRadius: 12,
+              padding: '10px 12px',
+            }}
+          >
+            {editing ? (
+              <TextArea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                autoSize={{ minRows: 3, maxRows: 12 }}
+                variant="borderless"
+                style={{ backgroundColor: 'transparent', padding: 0, fontSize: 14 }}
+              />
+            ) : (
+              <Typography.Paragraph
+                style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 14 }}
+              >
+                {displayAnswer}
+              </Typography.Paragraph>
+            )}
+
+            <ChunksBlock chunks={conv.retrievedChunks} />
+          </div>
+
+          {/* Action bar */}
+          <div style={{ marginTop: 6, display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
+            {status === 'sent' && (
+              <Typography.Text type="success" style={{ fontSize: 12 }}>
+                <CheckCircleOutlined /> 已发送
+                {conv.reviewedBy && ` by ${conv.reviewedBy}`}
+                {conv.sentAt && ` · ${formatTime(conv.sentAt)}`}
+              </Typography.Text>
+            )}
+            {status === 'rejected' && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                已拒绝{conv.reviewedBy && ` by ${conv.reviewedBy}`}
+              </Typography.Text>
+            )}
+            {status === 'failed' && (
+              <>
+                <Typography.Text type="danger" style={{ fontSize: 12, marginRight: 8 }}>
+                  ⚠️ 发送失败{conv.sendStatus === 'failed' ? '' : ''}
+                </Typography.Text>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<SendOutlined />}
+                  loading={sending}
+                  onClick={handleSend}
+                >
+                  重试
+                </Button>
+              </>
+            )}
+            {status === 'noanswer' && (
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                loading={regenerating}
+                onClick={handleRegenerate}
+              >
+                生成回答
+              </Button>
+            )}
+            {status === 'pending' && !editing && (
+              <>
+                <Button size="small" icon={<EditOutlined />} onClick={startEdit}>
+                  编辑
+                </Button>
+                <Button
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={regenerating}
+                  onClick={handleRegenerate}
+                >
+                  重新生成
+                </Button>
+                <Tooltip title="拒绝该回复">
+                  <Button size="small" danger icon={<CloseCircleOutlined />} onClick={handleReject}>
+                    拒绝
+                  </Button>
+                </Tooltip>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<SendOutlined />}
+                  loading={sending}
+                  onClick={handleSend}
+                >
+                  发送
+                </Button>
+              </>
+            )}
+            {status === 'pending' && editing && (
+              <>
+                <Button size="small" onClick={cancelEdit}>
+                  取消
+                </Button>
+                <Button size="small" icon={<SaveOutlined />} onClick={saveEdit}>
+                  保存
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<SendOutlined />}
+                  loading={sending}
+                  onClick={handleSend}
+                >
+                  保存并发送
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+interface PlayerBubbleProps {
+  playerName: string;
+  playerMessage: string;
+  timestamp: number;
+}
+
+const PlayerBubble: React.FC<PlayerBubbleProps> = ({ playerName, playerMessage, timestamp }) => {
+  const initial = (playerName || 'U').trim().charAt(0).toUpperCase();
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 14 }}>
+      <div style={{ maxWidth: '78%', display: 'flex', gap: 8 }}>
+        <Avatar size={36} style={{ backgroundColor: '#87d068', flexShrink: 0 }}>
+          {initial}
+        </Avatar>
+        <div>
+          <div style={{ fontSize: 11, color: '#8c8c8c', marginBottom: 4 }}>
+            {playerName || '玩家'} · {formatTime(timestamp)}
+          </div>
+          <div
+            style={{
+              backgroundColor: '#ffffff',
+              border: '1px solid #f0f0f0',
+              borderRadius: 12,
+              padding: '10px 12px',
+            }}
+          >
+            <Typography.Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 14 }}>
+              {playerMessage}
+            </Typography.Paragraph>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefresh }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [regenerating, setRegenerating] = useState(false);
+
+  // Sort ascending by timestamp for chat feel
+  const ordered = useMemo(
+    () => [...conversations].sort((a, b) => a.timestamp - b.timestamp),
+    [conversations],
+  );
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [ordered.length, ticket?.ticketId]);
+
+  if (!ticket) {
+    return (
+      <Card
+        style={{
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Empty description="请从左侧选择一个工单" />
+      </Card>
+    );
+  }
+
+  const handleStandaloneRegenerate = async () => {
+    setRegenerating(true);
+    try {
+      await regenerateAnswer(ticket.ticketId);
+      message.success('已重新生成');
+      onRefresh();
+    } catch {
+      message.error('重新生成失败');
+    } finally {
+      setRegenerating(false);
+    }
   };
+
+  // Detect if the ticket currently needs a new AI reply (last conv is player
+  // without any generated answer)
+  const last = ordered[ordered.length - 1];
+  const needsReply = last && last.playerMessage && !last.aiAnswer && last.reviewStatus === 'no_answer';
 
   return (
     <Spin spinning={loading}>
-      <Card size="small">
-        {/* Player Info */}
-        <Descriptions size="small" column={4} style={{ marginBottom: 12 }}>
+      <Card size="small" bodyStyle={{ padding: 12 }}>
+        {/* Header */}
+        <Descriptions size="small" column={4} style={{ marginBottom: 8 }}>
           <Descriptions.Item label="玩家">{ticket.userDisplayName || ticket.userId}</Descriptions.Item>
           <Descriptions.Item label="平台">{platformText(ticket.platform)}</Descriptions.Item>
           <Descriptions.Item label="工单号">#{ticket.ticketId}</Descriptions.Item>
@@ -102,168 +472,63 @@ const TicketDetail: React.FC<Props> = ({ ticket, conversations, loading, onRefre
             <Tag color={statusColor(ticket.reviewStatus)}>{statusText(ticket.reviewStatus)}</Tag>
           </Descriptions.Item>
         </Descriptions>
+        {ticket.appName && (
+          <Tag color="blue" style={{ marginBottom: 8 }}>
+            📱 {ticket.appName}
+          </Tag>
+        )}
         {ticket.tags && ticket.tags.length > 0 && (
-          <Space style={{ marginBottom: 12 }}>
-            {ticket.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}
+          <Space style={{ marginBottom: 8 }} wrap>
+            {ticket.tags.map((tag) => (
+              <Tag key={tag}>{tag}</Tag>
+            ))}
           </Space>
         )}
 
-        <Divider style={{ margin: '8px 0' }} />
-
-        {/* Player Message */}
-        <div style={{ marginBottom: 16 }}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            <UserOutlined /> 玩家消息
-          </Typography.Text>
-          <Card size="small" style={{ marginTop: 4, backgroundColor: '#f6f6f6' }}>
-            <Typography.Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
-              {latestConversation?.playerMessage || ticket.latestPlayerMessage}
-            </Typography.Paragraph>
-          </Card>
-        </div>
-
-        {/* AI Answer */}
-        <div style={{ marginBottom: 16 }}>
-          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              <RobotOutlined /> AI 建议回答
-              {latestConversation?.aiLatencyMs ? ` (${(latestConversation.aiLatencyMs / 1000).toFixed(1)}s)` : ''}
-            </Typography.Text>
-            {!editing && isPending && (
-              <Button size="small" icon={<EditOutlined />} onClick={startEditing}>编辑</Button>
-            )}
-          </Space>
-          {editing ? (
-            <TextArea
-              value={editedAnswer}
-              onChange={(e) => setEditedAnswer(e.target.value)}
-              rows={8}
-              style={{ marginTop: 4 }}
-            />
+        {/* Chat stream */}
+        <div
+          ref={scrollRef}
+          style={{
+            backgroundColor: '#f5f5f5',
+            borderRadius: 8,
+            padding: 12,
+            height: 'calc(100vh - 260px)',
+            overflowY: 'auto',
+          }}
+        >
+          {ordered.length === 0 ? (
+            <Empty description="暂无对话" />
           ) : (
-            <Card size="small" style={{ marginTop: 4, backgroundColor: '#f0f5ff', borderColor: '#adc6ff' }}>
-              <Typography.Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
-                {currentAnswer || '暂无 AI 回答'}
-              </Typography.Paragraph>
-            </Card>
+            ordered.map((conv) => (
+              <React.Fragment key={conv.timestamp}>
+                {conv.playerMessage && (
+                  <PlayerBubble
+                    playerName={conv.playerName || ticket.userDisplayName || ticket.userId}
+                    playerMessage={conv.playerMessage}
+                    timestamp={conv.timestamp}
+                  />
+                )}
+                {(conv.aiAnswer || conv.editedAnswer || conv.sentAnswer) && (
+                  <AIBubble ticket={ticket} conv={conv} onRefresh={onRefresh} />
+                )}
+                {!conv.aiAnswer && !conv.editedAnswer && conv.reviewStatus === 'no_answer' && (
+                  <AIBubble ticket={ticket} conv={conv} onRefresh={onRefresh} />
+                )}
+              </React.Fragment>
+            ))
           )}
         </div>
 
-        {/* Retrieved Chunks */}
-        {latestConversation?.retrievedChunks && latestConversation.retrievedChunks.length > 0 && (
-          <Collapse
-            size="small"
-            style={{ marginBottom: 16 }}
-            items={[{
-              key: 'chunks',
-              label: `🔍 召回片段 (${latestConversation.retrievedChunks.length})`,
-              children: latestConversation.retrievedChunks.map((chunk, i) => {
-                // Support both formats:
-                // New: question/answer fields explicitly set
-                // Old: content = question text, metadata.Answer = knowledge content
-                const metaAnswer = chunk.metadata?.Answer || chunk.metadata?.answer || '';
-                const question = chunk.question || (metaAnswer ? chunk.content : '');
-                const answer = chunk.answer || metaAnswer || '';
-                const displayContent = answer || chunk.content || '';
-
-                return (
-                <Card key={i} size="small" style={{ marginBottom: 8, backgroundColor: '#fafafa' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <Tag color={chunk.score >= 0.7 ? 'green' : chunk.score >= 0.4 ? 'orange' : 'red'}>
-                      置信度: {(chunk.score * 100).toFixed(1)}%
-                    </Tag>
-                    {chunk.uri && (
-                      <Typography.Text type="secondary" style={{ fontSize: 11 }} ellipsis>
-                        {chunk.uri.split('/').pop()}
-                      </Typography.Text>
-                    )}
-                  </div>
-                  {question && (
-                    <div style={{ marginBottom: 6 }}>
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>📋 匹配问题：</Typography.Text>
-                      <Typography.Paragraph style={{ fontSize: 13, margin: '2px 0 0', color: '#595959' }}>
-                        {question}
-                      </Typography.Paragraph>
-                    </div>
-                  )}
-                  <div>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>💡 知识片段：</Typography.Text>
-                    <Typography.Paragraph style={{ fontSize: 13, margin: '2px 0 0', whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
-                      {displayContent}
-                    </Typography.Paragraph>
-                  </div>
-                </Card>
-                );
-              }),
-            }]}
-          />
-        )}
-
-        {/* Sources */}
-        {latestConversation?.aiSources && latestConversation.aiSources.length > 0 && (
-          <Collapse
-            size="small"
-            style={{ marginBottom: 16 }}
-            items={[{
-              key: 'sources',
-              label: `📚 引用来源 (${latestConversation.aiSources.length})`,
-              children: latestConversation.aiSources.map((src, i) => (
-                <div key={i} style={{ marginBottom: 8 }}>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>{src.uri}</Typography.Text>
-                  <Typography.Paragraph style={{ fontSize: 12, margin: 0 }} ellipsis={{ rows: 2 }}>
-                    {src.snippet}
-                  </Typography.Paragraph>
-                </div>
-              )),
-            }]}
-          />
-        )}
-
-        {/* Action Buttons */}
-        {isPending && (
-          <Space>
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={handleApproveAndSend}
-              loading={sending}
-            >
-              确认发送
-            </Button>
+        {needsReply && (
+          <div style={{ marginTop: 8, textAlign: 'center' }}>
             <Button
               icon={<ReloadOutlined />}
-              onClick={handleRegenerate}
               loading={regenerating}
+              onClick={handleStandaloneRegenerate}
             >
-              重新生成
+              为最新消息生成回答
             </Button>
-            <Button danger icon={<CloseCircleOutlined />} onClick={handleReject}>
-              拒绝
-            </Button>
-          </Space>
-        )}
-
-        {/* Conversation Timeline */}
-        {conversations.length > 1 && (
-          <>
-            <Divider style={{ margin: '16px 0 8px' }}>历史对话</Divider>
-            <Timeline
-              items={conversations.slice(0, -1).map((conv) => ({
-                color: statusColor(conv.reviewStatus),
-                children: (
-                  <div style={{ fontSize: 12 }}>
-                    <Typography.Text type="secondary">{formatTime(conv.timestamp)}</Typography.Text>
-                    <div><strong>玩家:</strong> {conv.playerMessage?.substring(0, 100)}</div>
-                    <div><strong>AI:</strong> {(conv.editedAnswer || conv.aiAnswer)?.substring(0, 100)}</div>
-                    <Tag color={statusColor(conv.reviewStatus)} style={{ fontSize: 11 }}>
-                      {statusText(conv.reviewStatus)}
-                      {conv.reviewedBy && ` by ${conv.reviewedBy}`}
-                    </Tag>
-                  </div>
-                ),
-              }))}
-            />
-          </>
+          </div>
         )}
       </Card>
     </Spin>
